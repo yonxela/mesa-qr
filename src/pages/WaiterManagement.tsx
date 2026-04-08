@@ -3,8 +3,9 @@ import { collection, addDoc, deleteDoc, doc, updateDoc } from 'firebase/firestor
 import { db } from '@/lib/firebase'
 import { useAuth } from '@/hooks/useAuth'
 import { useCollection } from '@/hooks/useCollection'
+import { generateAccessCode } from '@/lib/utils'
 import type { Waiter } from '@/lib/types'
-import { Plus, Trash2, UserCheck, UserX } from 'lucide-react'
+import { Plus, Trash2, UserCheck, UserX, Copy, Check, AlertTriangle } from 'lucide-react'
 import { toast } from 'sonner'
 
 export default function WaiterManagement() {
@@ -14,25 +15,27 @@ export default function WaiterManagement() {
 
   const [showModal, setShowModal] = useState(false)
   const [formName, setFormName] = useState('')
-  const [formPin, setFormPin] = useState('')
   const [creating, setCreating] = useState(false)
+  const [copiedId, setCopiedId] = useState<string | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<Waiter | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!formName.trim() || !formPin.trim() || creating) return
+    if (!formName.trim() || creating) return
     setCreating(true)
     try {
+      const code = generateAccessCode()
       await addDoc(collection(db, `restaurants/${rid}/waiters`), {
         restaurant_id: rid,
         name: formName.trim(),
-        pin: formPin.trim(),
+        access_code: code,
         is_active: true,
         created_at: new Date().toISOString(),
       })
-      toast.success(`Mesero "${formName}" creado`)
+      toast.success(`Mesero "${formName}" creado. Código: ${code}`)
       setShowModal(false)
       setFormName('')
-      setFormPin('')
     } catch (err) {
       console.error(err)
       toast.error('Error al crear mesero')
@@ -49,15 +52,24 @@ export default function WaiterManagement() {
     }
   }
 
-  const handleDelete = async (w: Waiter) => {
-    if (!confirm(`¿Eliminar a "${w.name}"?`)) return
+  const confirmDelete = async () => {
+    if (!deleteTarget || deleting) return
+    setDeleting(true)
     try {
-      await deleteDoc(doc(db, `restaurants/${rid}/waiters`, w.id))
+      await deleteDoc(doc(db, `restaurants/${rid}/waiters`, deleteTarget.id))
       toast.success('Mesero eliminado')
     } catch (err) {
       console.error(err)
       toast.error('Error al eliminar')
     }
+    setDeleting(false)
+    setDeleteTarget(null)
+  }
+
+  const copyCode = (id: string, code: string) => {
+    navigator.clipboard.writeText(code)
+    setCopiedId(id)
+    setTimeout(() => setCopiedId(null), 2000)
   }
 
   return (
@@ -85,31 +97,69 @@ export default function WaiterManagement() {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {waiters.map((w) => (
-            <div key={w.id} className={`stat-card flex items-center gap-4 ${!w.is_active ? 'opacity-50' : ''}`}>
-              <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold ${w.is_active ? 'bg-emerald-500/20 text-emerald-400' : 'bg-zinc-800 text-zinc-500'}`}>
-                {w.name.charAt(0).toUpperCase()}
+            <div key={w.id} className={`stat-card flex flex-col gap-3 ${!w.is_active ? 'opacity-50' : ''}`}>
+              <div className="flex items-center gap-3">
+                <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold shrink-0 ${w.is_active ? 'bg-emerald-500/20 text-emerald-400' : 'bg-zinc-800 text-zinc-500'}`}>
+                  {w.name.charAt(0).toUpperCase()}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-semibold">{w.name}</p>
+                </div>
+                <div className="flex gap-1 shrink-0">
+                  <button
+                    onClick={() => toggleActive(w)}
+                    className={`p-2 rounded-lg transition-colors ${w.is_active ? 'text-emerald-400 hover:bg-emerald-500/10' : 'text-zinc-500 hover:bg-zinc-800'}`}
+                    title={w.is_active ? 'Desactivar' : 'Activar'}
+                  >
+                    {w.is_active ? <UserCheck size={16} /> : <UserX size={16} />}
+                  </button>
+                  <button
+                    onClick={() => setDeleteTarget(w)}
+                    className="p-2 rounded-lg text-zinc-600 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </div>
               </div>
-              <div className="flex-1">
-                <p className="font-semibold">{w.name}</p>
-                <p className="text-xs text-zinc-500">PIN: {w.pin}</p>
-              </div>
-              <div className="flex gap-1">
+
+              {/* Access Code */}
+              <div className="flex items-center gap-2 bg-dark-900 rounded-lg px-3 py-2">
+                <span className="text-xs text-zinc-500">Código:</span>
+                <span className="font-mono font-bold text-gold-400 tracking-wider flex-1">{w.access_code}</span>
                 <button
-                  onClick={() => toggleActive(w)}
-                  className={`p-2 rounded-lg transition-colors ${w.is_active ? 'text-emerald-400 hover:bg-emerald-500/10' : 'text-zinc-500 hover:bg-zinc-800'}`}
-                  title={w.is_active ? 'Desactivar' : 'Activar'}
+                  onClick={() => copyCode(w.id, w.access_code)}
+                  className="p-1 text-zinc-500 hover:text-gold-400 transition-colors"
                 >
-                  {w.is_active ? <UserCheck size={16} /> : <UserX size={16} />}
-                </button>
-                <button
-                  onClick={() => handleDelete(w)}
-                  className="p-2 rounded-lg text-zinc-600 hover:text-red-400 hover:bg-red-500/10 transition-colors"
-                >
-                  <Trash2 size={16} />
+                  {copiedId === w.id ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
                 </button>
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {deleteTarget && (
+        <div className="modal-overlay" onClick={() => !deleting && setDeleteTarget(null)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-full bg-red-500/20 flex items-center justify-center">
+                <AlertTriangle size={20} className="text-red-400" />
+              </div>
+              <h2 className="text-lg font-bold">Eliminar Mesero</h2>
+            </div>
+            <p className="text-sm text-zinc-400 mb-6">
+              ¿Estás seguro de eliminar a <strong className="text-white">"{deleteTarget.name}"</strong>? Su código de acceso dejará de funcionar.
+            </p>
+            <div className="flex gap-3">
+              <button onClick={() => setDeleteTarget(null)} disabled={deleting} className="btn-outline flex-1">
+                Cancelar
+              </button>
+              <button onClick={confirmDelete} disabled={deleting} className="btn-danger flex-1">
+                {deleting ? 'Eliminando...' : 'Sí, eliminar'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -130,23 +180,16 @@ export default function WaiterManagement() {
                   autoFocus
                 />
               </div>
-              <div>
-                <label className="text-xs text-zinc-400 mb-1.5 block">PIN *</label>
-                <input
-                  type="text"
-                  value={formPin}
-                  onChange={(e) => setFormPin(e.target.value)}
-                  placeholder="Ej: 1234"
-                  maxLength={6}
-                  className="input-dark"
-                />
-                <p className="text-xs text-zinc-600 mt-1">PIN para identificar al mesero</p>
-              </div>
+
+              <p className="text-xs text-zinc-500 bg-dark-900 rounded-lg p-3">
+                📋 Se generará automáticamente un código de acceso para que el mesero pueda ingresar al sistema
+              </p>
+
               <div className="flex gap-3 mt-2">
                 <button type="button" onClick={() => setShowModal(false)} className="btn-outline flex-1">
                   Cancelar
                 </button>
-                <button type="submit" disabled={!formName.trim() || !formPin.trim() || creating} className="btn-gold flex-1">
+                <button type="submit" disabled={!formName.trim() || creating} className="btn-gold flex-1">
                   {creating ? 'Creando...' : 'Crear'}
                 </button>
               </div>

@@ -2,7 +2,7 @@ import { createContext, useContext, useState, useEffect, type ReactNode } from '
 import { collection, query, where, getDocs } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
 import { MASTER_CODE } from '@/lib/utils'
-import type { Session, UserRole } from '@/lib/types'
+import type { Session } from '@/lib/types'
 
 interface AuthContextType {
   session: Session | null
@@ -45,15 +45,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     // 2. Check restaurant access code
     try {
-      const q = query(collection(db, 'restaurants'), where('access_code', '==', trimmed))
-      const snap = await getDocs(q)
+      const rq = query(collection(db, 'restaurants'), where('access_code', '==', trimmed))
+      const rSnap = await getDocs(rq)
 
-      if (!snap.empty) {
-        const doc = snap.docs[0]
-        const data = doc.data()
+      if (!rSnap.empty) {
+        const rDoc = rSnap.docs[0]
+        const data = rDoc.data()
         const s: Session = {
           role: 'restaurant_admin',
-          restaurantId: doc.id,
+          restaurantId: rDoc.id,
           restaurantName: data.name,
         }
         sessionStorage.setItem(SESSION_KEY, JSON.stringify(s))
@@ -63,6 +63,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch (err) {
       console.error('Error checking restaurant code:', err)
       return { success: false, error: 'Error de conexión. Inténtalo de nuevo.' }
+    }
+
+    // 3. Check waiter access code (iterate each restaurant's waiters)
+    try {
+      const allRestaurants = await getDocs(collection(db, 'restaurants'))
+
+      for (const rDoc of allRestaurants.docs) {
+        const wq = query(
+          collection(db, `restaurants/${rDoc.id}/waiters`),
+          where('access_code', '==', trimmed)
+        )
+        const wSnap = await getDocs(wq)
+
+        if (!wSnap.empty) {
+          const waiterDoc = wSnap.docs[0]
+          const waiterData = waiterDoc.data()
+
+          // Check if waiter is active
+          if (!waiterData.is_active) {
+            return { success: false, error: 'Esta cuenta de mesero está desactivada' }
+          }
+
+          const s: Session = {
+            role: 'waiter',
+            restaurantId: rDoc.id,
+            restaurantName: rDoc.data().name,
+            waiterId: waiterDoc.id,
+            waiterName: waiterData.name,
+          }
+          sessionStorage.setItem(SESSION_KEY, JSON.stringify(s))
+          setSession(s)
+          return { success: true }
+        }
+      }
+    } catch (err) {
+      console.error('Error checking waiter code:', err)
     }
 
     return { success: false, error: 'Código no válido' }

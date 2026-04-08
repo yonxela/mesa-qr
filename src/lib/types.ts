@@ -40,7 +40,7 @@ export interface Waiter {
   id: string
   restaurant_id: string
   name: string
-  pin: string
+  access_code: string // ABC123 format, auto-generated
   is_active: boolean
   created_at: string
 }

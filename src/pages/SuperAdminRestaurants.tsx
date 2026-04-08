@@ -1,10 +1,10 @@
 import { useState } from 'react'
-import { collection, addDoc, deleteDoc, doc, serverTimestamp } from 'firebase/firestore'
+import { collection, addDoc, deleteDoc, doc } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
 import { useCollection } from '@/hooks/useCollection'
 import { generateAccessCode, slugify } from '@/lib/utils'
 import type { Restaurant } from '@/lib/types'
-import { Plus, Trash2, Copy, Check, Store } from 'lucide-react'
+import { Plus, Trash2, Copy, Check, Store, AlertTriangle } from 'lucide-react'
 import { toast } from 'sonner'
 
 export default function SuperAdminRestaurants() {
@@ -15,6 +15,8 @@ export default function SuperAdminRestaurants() {
   const [formPhone, setFormPhone] = useState('')
   const [creating, setCreating] = useState(false)
   const [copiedId, setCopiedId] = useState<string | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -45,15 +47,18 @@ export default function SuperAdminRestaurants() {
     setCreating(false)
   }
 
-  const handleDelete = async (id: string, name: string) => {
-    if (!confirm(`¿Eliminar "${name}"? Se borrarán todas sus mesas, meseros y solicitudes.`)) return
+  const confirmDelete = async () => {
+    if (!deleteTarget || deleting) return
+    setDeleting(true)
     try {
-      await deleteDoc(doc(db, 'restaurants', id))
+      await deleteDoc(doc(db, 'restaurants', deleteTarget.id))
       toast.success('Restaurante eliminado')
     } catch (err) {
       console.error(err)
       toast.error('Error al eliminar')
     }
+    setDeleting(false)
+    setDeleteTarget(null)
   }
 
   const copyCode = (id: string, code: string) => {
@@ -96,7 +101,7 @@ export default function SuperAdminRestaurants() {
                   {r.address && <p className="text-xs text-zinc-500 mt-1">{r.address}</p>}
                 </div>
                 <button
-                  onClick={() => handleDelete(r.id, r.name)}
+                  onClick={() => setDeleteTarget({ id: r.id, name: r.name })}
                   className="p-2 rounded-lg text-zinc-600 hover:text-red-400 hover:bg-red-500/10 transition-colors"
                 >
                   <Trash2 size={16} />
@@ -120,6 +125,39 @@ export default function SuperAdminRestaurants() {
               )}
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {deleteTarget && (
+        <div className="modal-overlay" onClick={() => !deleting && setDeleteTarget(null)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-full bg-red-500/20 flex items-center justify-center">
+                <AlertTriangle size={20} className="text-red-400" />
+              </div>
+              <h2 className="text-lg font-bold">Eliminar Restaurante</h2>
+            </div>
+            <p className="text-sm text-zinc-400 mb-6">
+              ¿Estás seguro de eliminar <strong className="text-white">"{deleteTarget.name}"</strong>? Se borrarán todas sus mesas, meseros y solicitudes. Esta acción no se puede deshacer.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setDeleteTarget(null)}
+                disabled={deleting}
+                className="btn-outline flex-1"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={confirmDelete}
+                disabled={deleting}
+                className="btn-danger flex-1"
+              >
+                {deleting ? 'Eliminando...' : 'Sí, eliminar'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

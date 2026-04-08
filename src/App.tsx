@@ -28,7 +28,7 @@ function WaiterProtectedRoute() {
     )
   }
 
-  if (!session || session.role !== 'restaurant_admin') return <Navigate to="/" replace />
+  if (!session || session.role !== 'waiter') return <Navigate to="/" replace />
   return <WaiterPanel />
 }
 
