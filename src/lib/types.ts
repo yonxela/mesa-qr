@@ -1,16 +1,16 @@
+// ─── Roles ───
 export type UserRole = 'super_admin' | 'restaurant_admin' | 'waiter'
 
-export interface Profile {
-  id: string
-  full_name: string
+// ─── Session (stored in sessionStorage) ───
+export interface Session {
   role: UserRole
-  restaurant_id: string | null
-  pin: string | null
-  avatar_url: string | null
-  is_active: boolean
-  created_at: string
+  restaurantId?: string
+  restaurantName?: string
+  waiterId?: string
+  waiterName?: string
 }
 
+// ─── Restaurant ───
 export interface Restaurant {
   id: string
   name: string
@@ -19,10 +19,11 @@ export interface Restaurant {
   address: string | null
   phone: string | null
   primary_color: string
+  access_code: string // ABC123 format
   created_at: string
-  owner_id: string
 }
 
+// ─── Table ───
 export interface Table {
   id: string
   restaurant_id: string
@@ -30,22 +31,31 @@ export interface Table {
   label: string | null
   qr_token: string
   status: 'available' | 'occupied' | 'needs_attention'
+  assigned_waiter_id: string | null
   created_at: string
 }
 
-export interface WaiterAssignment {
+// ─── Waiter ───
+export interface Waiter {
   id: string
-  waiter_id: string
-  table_id: string
+  restaurant_id: string
+  name: string
+  pin: string
+  is_active: boolean
   created_at: string
 }
+
+// ─── Service Request ───
+export type RequestType = 'attention' | 'bill' | 'menu' | 'complaint'
+export type RequestStatus = 'pending' | 'seen' | 'in_progress' | 'completed'
 
 export interface ServiceRequest {
   id: string
-  table_id: string
   restaurant_id: string
-  type: 'attention' | 'bill' | 'menu' | 'complaint'
-  status: 'pending' | 'seen' | 'in_progress' | 'completed'
+  table_id: string
+  table_number: number
+  type: RequestType
+  status: RequestStatus
   waiter_id: string | null
   customer_note: string | null
   created_at: string
@@ -54,17 +64,13 @@ export interface ServiceRequest {
   completed_at: string | null
 }
 
+// ─── Rating ───
 export interface Rating {
   id: string
-  service_request_id: string
-  table_id: string
+  request_id: string
   restaurant_id: string
+  table_id: string
   score: number
   comment: string | null
   created_at: string
-}
-
-export interface ServiceRequestWithTable extends ServiceRequest {
-  table?: Table
-  waiter?: Profile
 }

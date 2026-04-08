@@ -1,152 +1,114 @@
 import { useState } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
-import { motion } from 'framer-motion'
-import { supabase } from '@/lib/supabase'
-import { Card, CardContent } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { Star, CheckCircle2, Loader2 } from 'lucide-react'
+import { useParams } from 'react-router-dom'
+import { collection, query, where, getDocs, addDoc } from 'firebase/firestore'
+import { db } from '@/lib/firebase'
+import { Star } from 'lucide-react'
 
 export default function CustomerRating() {
   const { slug, token, requestId } = useParams()
-  const navigate = useNavigate()
   const [score, setScore] = useState(0)
-  const [hoveredScore, setHoveredScore] = useState(0)
+  const [hoverScore, setHoverScore] = useState(0)
   const [comment, setComment] = useState('')
+  const [submitting, setSubmitting] = useState(false)
   const [submitted, setSubmitted] = useState(false)
-  const [loading, setLoading] = useState(false)
 
-  async function submitRating() {
-    if (score === 0 || !requestId) return
-    setLoading(true)
+  const handleSubmit = async () => {
+    if (score === 0 || submitting) return
+    setSubmitting(true)
 
-    const { data: request } = await supabase
-      .from('service_requests')
-      .select('table_id, restaurant_id')
-      .eq('id', requestId)
-      .single()
+    try {
+      // Find restaurant
+      const rq = query(collection(db, 'restaurants'), where('slug', '==', slug))
+      const rSnap = await getDocs(rq)
+      if (rSnap.empty) { alert('Restaurant not found'); return }
+      const rid = rSnap.docs[0].id
 
-    if (request) {
-      await supabase.from('ratings').insert({
-        service_request_id: requestId,
-        table_id: request.table_id,
-        restaurant_id: request.restaurant_id,
+      // Find table
+      const tq = query(collection(db, `restaurants/${rid}/tables`), where('qr_token', '==', token))
+      const tSnap = await getDocs(tq)
+      const tableId = tSnap.empty ? '' : tSnap.docs[0].id
+
+      await addDoc(collection(db, `restaurants/${rid}/ratings`), {
+        request_id: requestId,
+        restaurant_id: rid,
+        table_id: tableId,
         score,
-        comment: comment || null,
+        comment: comment.trim() || null,
+        created_at: new Date().toISOString(),
       })
+      setSubmitted(true)
+    } catch (err) {
+      console.error(err)
+      alert('Error al enviar calificación')
     }
-
-    setSubmitted(true)
-    setLoading(false)
+    setSubmitting(false)
   }
 
   if (submitted) {
     return (
-      <div className="min-h-screen bg-dark-900 flex items-center justify-center p-6">
-        <motion.div
-          initial={{ opacity: 0, scale: 0.9 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="max-w-sm w-full"
-        >
-          <Card className="glass">
-            <CardContent className="py-12 text-center">
-              <motion.div
-                initial={{ scale: 0 }}
-                animate={{ scale: 1 }}
-                transition={{ type: 'spring', stiffness: 200, delay: 0.2 }}
-              >
-                <CheckCircle2 className="w-16 h-16 text-green-400 mx-auto mb-4" />
-              </motion.div>
-              <h2 className="text-xl font-bold mb-2">¡Gracias!</h2>
-              <p className="text-dark-400 text-sm">Su calificación nos ayuda a mejorar el servicio.</p>
-              <div className="flex justify-center gap-1 mt-4">
-                {[1, 2, 3, 4, 5].map(i => (
-                  <Star key={i} className={`w-6 h-6 ${i <= score ? 'text-gold-400 fill-gold-400' : 'text-dark-600'}`} />
-                ))}
-              </div>
-              <Button
-                variant="ghost"
-                className="mt-6"
-                onClick={() => navigate(`/r/${slug}/mesa/${token}`)}
-              >
-                Volver al menú
-              </Button>
-            </CardContent>
-          </Card>
-        </motion.div>
+      <div className="min-h-screen bg-dark-950 flex items-center justify-center p-6">
+        <div className="text-center animate-fade-in">
+          <p className="text-5xl mb-4">🙏</p>
+          <h1 className="text-2xl font-bold mb-2">¡Gracias!</h1>
+          <p className="text-zinc-500">Tu opinión nos ayuda a mejorar.</p>
+        </div>
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen bg-dark-900 flex items-center justify-center p-6">
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="max-w-sm w-full space-y-6"
-      >
-        <div className="text-center">
-          <h1 className="font-serif text-2xl font-bold gold-text">Califique el Servicio</h1>
-          <p className="text-dark-400 text-sm mt-2">¿Cómo fue su experiencia?</p>
+    <div className="min-h-screen bg-dark-950 flex items-center justify-center p-6">
+      <div className="w-full max-w-sm animate-fade-in">
+        <div className="text-center mb-8">
+          <h1 className="text-2xl font-bold mb-2">¿Cómo fue tu experiencia?</h1>
+          <p className="text-sm text-zinc-500">Tu opinión es muy importante</p>
         </div>
 
-        <Card className="glass">
-          <CardContent className="p-6 space-y-6">
-            {/* Stars */}
-            <div className="flex justify-center gap-2">
-              {[1, 2, 3, 4, 5].map(i => (
-                <motion.button
-                  key={i}
-                  whileHover={{ scale: 1.2 }}
-                  whileTap={{ scale: 0.9 }}
-                  onMouseEnter={() => setHoveredScore(i)}
-                  onMouseLeave={() => setHoveredScore(0)}
-                  onClick={() => setScore(i)}
-                  className="cursor-pointer p-1"
-                >
-                  <Star
-                    className={`w-10 h-10 transition-all ${
-                      i <= (hoveredScore || score)
-                        ? 'text-gold-400 fill-gold-400'
-                        : 'text-dark-600'
-                    }`}
-                  />
-                </motion.button>
-              ))}
-            </div>
-            {score > 0 && (
-              <motion.p
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className="text-center text-sm text-dark-300"
-              >
-                {score === 1 && 'Muy malo'}
-                {score === 2 && 'Malo'}
-                {score === 3 && 'Regular'}
-                {score === 4 && 'Bueno'}
-                {score === 5 && 'Excelente'}
-              </motion.p>
-            )}
-
-            {/* Comment */}
-            <textarea
-              value={comment}
-              onChange={(e) => setComment(e.target.value)}
-              placeholder="Comentario opcional..."
-              maxLength={300}
-              className="w-full h-24 rounded-xl border border-dark-600 bg-dark-800 px-4 py-3 text-sm text-dark-50 placeholder:text-dark-400 focus:outline-none focus:ring-2 focus:ring-gold-400 resize-none"
-            />
-
-            <Button
-              onClick={submitRating}
-              className="w-full"
-              disabled={score === 0 || loading}
+        {/* Stars */}
+        <div className="flex justify-center gap-2 mb-8">
+          {[1, 2, 3, 4, 5].map((n) => (
+            <button
+              key={n}
+              onMouseEnter={() => setHoverScore(n)}
+              onMouseLeave={() => setHoverScore(0)}
+              onClick={() => setScore(n)}
+              className="transition-transform hover:scale-110"
             >
-              {loading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
-              Enviar Calificación
-            </Button>
-          </CardContent>
-        </Card>
-      </motion.div>
+              <Star
+                size={40}
+                className={`transition-colors ${
+                  n <= (hoverScore || score)
+                    ? 'text-amber-400 fill-amber-400'
+                    : 'text-zinc-700'
+                }`}
+              />
+            </button>
+          ))}
+        </div>
+
+        {score > 0 && (
+          <p className="text-center text-sm text-zinc-400 mb-6">
+            {score === 1 ? '😞 Muy malo' : score === 2 ? '😕 Malo' : score === 3 ? '😐 Regular' : score === 4 ? '😊 Bueno' : '🤩 Excelente'}
+          </p>
+        )}
+
+        {/* Comment */}
+        <textarea
+          value={comment}
+          onChange={(e) => setComment(e.target.value)}
+          placeholder="¿Algo que quieras comentar? (opcional)"
+          rows={3}
+          className="input-dark resize-none mb-5"
+        />
+
+        <button
+          onClick={handleSubmit}
+          disabled={score === 0 || submitting}
+          className="btn-gold w-full py-4 text-base"
+        >
+          {submitting ? 'Enviando...' : 'Enviar Calificación'}
+        </button>
+      </div>
     </div>
   )
 }

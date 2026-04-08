@@ -1,72 +1,80 @@
-import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from 'react'
-import type { User } from '@supabase/supabase-js'
-import { supabase } from '@/lib/supabase'
-import type { Profile } from '@/lib/types'
+import { createContext, useContext, useState, useEffect, type ReactNode } from 'react'
+import { collection, query, where, getDocs } from 'firebase/firestore'
+import { db } from '@/lib/firebase'
+import { MASTER_CODE } from '@/lib/utils'
+import type { Session, UserRole } from '@/lib/types'
 
 interface AuthContextType {
-  user: User | null
-  profile: Profile | null
+  session: Session | null
   loading: boolean
-  signIn: (email: string, password: string) => Promise<{ error: string | null }>
-  signOut: () => Promise<void>
-  refreshProfile: () => Promise<void>
+  login: (code: string) => Promise<{ success: boolean; error?: string }>
+  logout: () => void
 }
 
 const AuthContext = createContext<AuthContextType | null>(null)
 
+const SESSION_KEY = 'serviqr_session'
+
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null)
-  const [profile, setProfile] = useState<Profile | null>(null)
+  const [session, setSession] = useState<Session | null>(null)
   const [loading, setLoading] = useState(true)
 
-  const fetchProfile = useCallback(async (userId: string) => {
-    const { data } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', userId)
-      .single()
-    setProfile(data)
+  // Restore session from sessionStorage
+  useEffect(() => {
+    try {
+      const stored = sessionStorage.getItem(SESSION_KEY)
+      if (stored) {
+        setSession(JSON.parse(stored))
+      }
+    } catch {
+      sessionStorage.removeItem(SESSION_KEY)
+    }
+    setLoading(false)
   }, [])
 
-  const refreshProfile = useCallback(async () => {
-    if (user) await fetchProfile(user.id)
-  }, [user, fetchProfile])
+  const login = async (code: string): Promise<{ success: boolean; error?: string }> => {
+    const trimmed = code.trim().toUpperCase()
 
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null)
-      if (session?.user) {
-        fetchProfile(session.user.id)
+    // 1. Check master code
+    if (trimmed === MASTER_CODE) {
+      const s: Session = { role: 'super_admin' }
+      sessionStorage.setItem(SESSION_KEY, JSON.stringify(s))
+      setSession(s)
+      return { success: true }
+    }
+
+    // 2. Check restaurant access code
+    try {
+      const q = query(collection(db, 'restaurants'), where('access_code', '==', trimmed))
+      const snap = await getDocs(q)
+
+      if (!snap.empty) {
+        const doc = snap.docs[0]
+        const data = doc.data()
+        const s: Session = {
+          role: 'restaurant_admin',
+          restaurantId: doc.id,
+          restaurantName: data.name,
+        }
+        sessionStorage.setItem(SESSION_KEY, JSON.stringify(s))
+        setSession(s)
+        return { success: true }
       }
-      setLoading(false)
-    })
+    } catch (err) {
+      console.error('Error checking restaurant code:', err)
+      return { success: false, error: 'Error de conexión. Inténtalo de nuevo.' }
+    }
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null)
-      if (session?.user) {
-        fetchProfile(session.user.id)
-      } else {
-        setProfile(null)
-      }
-      setLoading(false)
-    })
-
-    return () => subscription.unsubscribe()
-  }, [fetchProfile])
-
-  const signIn = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
-    if (error) return { error: error.message }
-    return { error: null }
+    return { success: false, error: 'Código no válido' }
   }
 
-  const signOut = async () => {
-    await supabase.auth.signOut()
-    setProfile(null)
+  const logout = () => {
+    sessionStorage.removeItem(SESSION_KEY)
+    setSession(null)
   }
 
   return (
-    <AuthContext.Provider value={{ user, profile, loading, signIn, signOut, refreshProfile }}>
+    <AuthContext.Provider value={{ session, loading, login, logout }}>
       {children}
     </AuthContext.Provider>
   )

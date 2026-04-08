@@ -1,258 +1,182 @@
-import { useEffect, useState } from 'react'
-import { motion } from 'framer-motion'
-import { supabase } from '@/lib/supabase'
-import { useAuth } from '@/hooks/useAuth'
-import { slugify } from '@/lib/utils'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
-import { Badge } from '@/components/ui/badge'
-import { Plus, Building2, Trash2, UserPlus, Loader2 } from 'lucide-react'
-import type { Restaurant, Profile } from '@/lib/types'
+import { useState } from 'react'
+import { collection, addDoc, deleteDoc, doc, serverTimestamp } from 'firebase/firestore'
+import { db } from '@/lib/firebase'
+import { useCollection } from '@/hooks/useCollection'
+import { generateAccessCode, slugify } from '@/lib/utils'
+import type { Restaurant } from '@/lib/types'
+import { Plus, Trash2, Copy, Check, Store } from 'lucide-react'
+import { toast } from 'sonner'
 
 export default function SuperAdminRestaurants() {
-  const { user } = useAuth()
-  const [restaurants, setRestaurants] = useState<Restaurant[]>([])
-  const [admins, setAdmins] = useState<Record<string, Profile[]>>({})
-  const [showCreate, setShowCreate] = useState(false)
-  const [showAddAdmin, setShowAddAdmin] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [form, setForm] = useState({ name: '', address: '', phone: '', primary_color: '#C6A961' })
-  const [adminForm, setAdminForm] = useState({ email: '', password: '', full_name: '' })
+  const { data: restaurants, loading } = useCollection<Restaurant>('restaurants')
+  const [showCreateModal, setShowCreateModal] = useState(false)
+  const [formName, setFormName] = useState('')
+  const [formAddress, setFormAddress] = useState('')
+  const [formPhone, setFormPhone] = useState('')
+  const [creating, setCreating] = useState(false)
+  const [copiedId, setCopiedId] = useState<string | null>(null)
 
-  useEffect(() => { loadData() }, [])
-
-  async function loadData() {
-    const { data } = await supabase.from('restaurants').select('*').order('created_at', { ascending: false })
-    setRestaurants(data || [])
-    if (data) {
-      const adminMap: Record<string, Profile[]> = {}
-      for (const r of data) {
-        const { data: profiles } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('restaurant_id', r.id)
-          .eq('role', 'restaurant_admin')
-        adminMap[r.id] = profiles || []
-      }
-      setAdmins(adminMap)
-    }
-  }
-
-  async function createRestaurant(e: React.FormEvent) {
+  const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!user) return
-    setLoading(true)
-    const slug = slugify(form.name)
-    const { error } = await supabase.from('restaurants').insert({
-      name: form.name,
-      slug,
-      address: form.address || null,
-      phone: form.phone || null,
-      primary_color: form.primary_color,
-      owner_id: user.id,
-    })
-    if (!error) {
-      setForm({ name: '', address: '', phone: '', primary_color: '#C6A961' })
-      setShowCreate(false)
-      loadData()
+    if (!formName.trim() || creating) return
+    setCreating(true)
+
+    try {
+      const code = generateAccessCode()
+      await addDoc(collection(db, 'restaurants'), {
+        name: formName.trim(),
+        slug: slugify(formName.trim()),
+        logo_url: null,
+        address: formAddress.trim() || null,
+        phone: formPhone.trim() || null,
+        primary_color: '#D4A843',
+        access_code: code,
+        created_at: new Date().toISOString(),
+      })
+      toast.success(`Restaurante creado. Código: ${code}`)
+      setShowCreateModal(false)
+      setFormName('')
+      setFormAddress('')
+      setFormPhone('')
+    } catch (err) {
+      console.error(err)
+      toast.error('Error al crear restaurante')
     }
-    setLoading(false)
+    setCreating(false)
   }
 
-  async function createAdmin(e: React.FormEvent) {
-    e.preventDefault()
-    if (!showAddAdmin) return
-    setLoading(true)
-
-    const { data: authData, error: authError } = await supabase.auth.signUp({
-      email: adminForm.email,
-      password: adminForm.password,
-    })
-
-    if (authError || !authData.user) {
-      setLoading(false)
-      return
+  const handleDelete = async (id: string, name: string) => {
+    if (!confirm(`¿Eliminar "${name}"? Se borrarán todas sus mesas, meseros y solicitudes.`)) return
+    try {
+      await deleteDoc(doc(db, 'restaurants', id))
+      toast.success('Restaurante eliminado')
+    } catch (err) {
+      console.error(err)
+      toast.error('Error al eliminar')
     }
-
-    await supabase.from('profiles').insert({
-      id: authData.user.id,
-      full_name: adminForm.full_name,
-      role: 'restaurant_admin',
-      restaurant_id: showAddAdmin,
-    })
-
-    setAdminForm({ email: '', password: '', full_name: '' })
-    setShowAddAdmin(null)
-    loadData()
-    setLoading(false)
   }
 
-  async function deleteRestaurant(id: string) {
-    if (!confirm('¿Está seguro de eliminar este restaurante? Se eliminarán todas las mesas, meseros y solicitudes asociadas.')) return
-    await supabase.from('restaurants').delete().eq('id', id)
-    loadData()
+  const copyCode = (id: string, code: string) => {
+    navigator.clipboard.writeText(code)
+    setCopiedId(id)
+    setTimeout(() => setCopiedId(null), 2000)
   }
 
   return (
-    <div className="space-y-8">
-      <div className="flex items-center justify-between">
+    <div className="animate-fade-in">
+      <div className="flex items-center justify-between mb-8">
         <div>
-          <h1 className="font-serif text-3xl font-bold gold-text">Restaurantes</h1>
-          <p className="text-dark-400 mt-1">Gestione todos los restaurantes del sistema</p>
+          <h1 className="text-2xl font-bold">Restaurantes</h1>
+          <p className="text-sm text-zinc-500 mt-1">Gestiona los restaurantes registrados</p>
         </div>
-        <Button onClick={() => setShowCreate(true)} className="gap-2">
-          <Plus className="w-4 h-4" />
+        <button onClick={() => setShowCreateModal(true)} className="btn-gold flex items-center gap-2">
+          <Plus size={16} />
           Nuevo Restaurante
-        </Button>
+        </button>
       </div>
 
-      {restaurants.length === 0 ? (
-        <Card className="glass">
-          <CardContent className="py-16 text-center">
-            <Building2 className="w-12 h-12 text-dark-500 mx-auto mb-4" />
-            <h3 className="text-lg font-medium text-dark-300">No hay restaurantes</h3>
-            <p className="text-dark-500 text-sm mt-1">Cree su primer restaurante para comenzar</p>
-          </CardContent>
-        </Card>
+      {/* List */}
+      {loading ? (
+        <div className="flex justify-center py-20">
+          <div className="w-8 h-8 border-2 border-gold-400 border-t-transparent rounded-full animate-spin" />
+        </div>
+      ) : restaurants.length === 0 ? (
+        <div className="text-center py-20">
+          <Store size={48} className="mx-auto text-zinc-700 mb-4" />
+          <p className="text-zinc-500">No hay restaurantes registrados</p>
+          <p className="text-sm text-zinc-600 mt-1">Crea el primero con el botón de arriba</p>
+        </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {restaurants.map((r, i) => (
-            <motion.div
-              key={r.id}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: i * 0.05 }}
-            >
-              <Card className="glass hover:border-gold-500/30 transition-all">
-                <CardHeader className="pb-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <div
-                        className="w-12 h-12 rounded-xl flex items-center justify-center text-lg font-bold font-serif"
-                        style={{ backgroundColor: r.primary_color + '20', color: r.primary_color }}
-                      >
-                        {r.name.charAt(0)}
-                      </div>
-                      <div>
-                        <CardTitle className="text-base">{r.name}</CardTitle>
-                        <p className="text-xs text-dark-400 mt-0.5">{r.address || 'Sin dirección'}</p>
-                      </div>
-                    </div>
-                    <Button variant="ghost" size="icon" onClick={() => deleteRestaurant(r.id)} className="text-dark-400 hover:text-red-400">
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="text-dark-400">Slug:</span>
-                      <code className="text-gold-400 bg-dark-700 px-2 py-0.5 rounded text-xs">{r.slug}</code>
-                    </div>
-                    {r.phone && (
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="text-dark-400">Teléfono:</span>
-                        <span>{r.phone}</span>
-                      </div>
-                    )}
-                    <div className="border-t border-dark-700 pt-3">
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-sm text-dark-400">Administradores</span>
-                        <Button variant="ghost" size="sm" onClick={() => setShowAddAdmin(r.id)} className="gap-1 text-xs">
-                          <UserPlus className="w-3 h-3" />
-                          Agregar
-                        </Button>
-                      </div>
-                      {(admins[r.id] || []).length === 0 ? (
-                        <p className="text-xs text-dark-500">Sin administradores asignados</p>
-                      ) : (
-                        <div className="flex flex-wrap gap-2">
-                          {(admins[r.id] || []).map((a) => (
-                            <Badge key={a.id} variant="secondary">{a.full_name}</Badge>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </motion.div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {restaurants.map((r) => (
+            <div key={r.id} className="stat-card flex flex-col gap-3">
+              <div className="flex items-start justify-between">
+                <div>
+                  <h3 className="font-semibold text-lg">{r.name}</h3>
+                  {r.address && <p className="text-xs text-zinc-500 mt-1">{r.address}</p>}
+                </div>
+                <button
+                  onClick={() => handleDelete(r.id, r.name)}
+                  className="p-2 rounded-lg text-zinc-600 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                >
+                  <Trash2 size={16} />
+                </button>
+              </div>
+
+              {/* Access Code */}
+              <div className="flex items-center gap-2 bg-dark-900 rounded-lg px-3 py-2">
+                <span className="text-xs text-zinc-500">Código:</span>
+                <span className="font-mono font-bold text-gold-400 tracking-wider flex-1">{r.access_code}</span>
+                <button
+                  onClick={() => copyCode(r.id, r.access_code)}
+                  className="p-1 text-zinc-500 hover:text-gold-400 transition-colors"
+                >
+                  {copiedId === r.id ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
+                </button>
+              </div>
+
+              {r.phone && (
+                <p className="text-xs text-zinc-500">📞 {r.phone}</p>
+              )}
+            </div>
           ))}
         </div>
       )}
 
-      {/* Create Restaurant Dialog */}
-      <Dialog open={showCreate} onOpenChange={setShowCreate}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Nuevo Restaurante</DialogTitle>
-            <DialogDescription>Complete la información del restaurante</DialogDescription>
-          </DialogHeader>
-          <form onSubmit={createRestaurant} className="space-y-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-dark-200">Nombre *</label>
-              <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Mi Restaurante" required />
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-dark-200">Dirección</label>
-              <Input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} placeholder="Av. Principal #123" />
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-dark-200">Teléfono</label>
-                <Input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="+1 234 567 890" />
+      {/* Create Modal */}
+      {showCreateModal && (
+        <div className="modal-overlay" onClick={() => setShowCreateModal(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <h2 className="text-lg font-bold mb-5">Nuevo Restaurante</h2>
+            <form onSubmit={handleCreate} className="flex flex-col gap-4">
+              <div>
+                <label className="text-xs text-zinc-400 mb-1.5 block">Nombre *</label>
+                <input
+                  type="text"
+                  value={formName}
+                  onChange={(e) => setFormName(e.target.value)}
+                  placeholder="Ej: La Parrilla de Juan"
+                  className="input-dark"
+                  autoFocus
+                />
               </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-dark-200">Color</label>
-                <div className="flex items-center gap-2">
-                  <input type="color" value={form.primary_color} onChange={(e) => setForm({ ...form, primary_color: e.target.value })} className="w-11 h-11 rounded-xl border border-dark-600 bg-dark-800 cursor-pointer" />
-                  <Input value={form.primary_color} onChange={(e) => setForm({ ...form, primary_color: e.target.value })} className="font-mono text-xs" />
-                </div>
+              <div>
+                <label className="text-xs text-zinc-400 mb-1.5 block">Dirección</label>
+                <input
+                  type="text"
+                  value={formAddress}
+                  onChange={(e) => setFormAddress(e.target.value)}
+                  placeholder="Ej: Zona 10, Ciudad de Guatemala"
+                  className="input-dark"
+                />
               </div>
-            </div>
-            <div className="flex justify-end gap-3 pt-2">
-              <Button variant="secondary" type="button" onClick={() => setShowCreate(false)}>Cancelar</Button>
-              <Button type="submit" disabled={loading}>
-                {loading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
-                Crear Restaurante
-              </Button>
-            </div>
-          </form>
-        </DialogContent>
-      </Dialog>
+              <div>
+                <label className="text-xs text-zinc-400 mb-1.5 block">Teléfono</label>
+                <input
+                  type="text"
+                  value={formPhone}
+                  onChange={(e) => setFormPhone(e.target.value)}
+                  placeholder="Ej: 5555-1234"
+                  className="input-dark"
+                />
+              </div>
 
-      {/* Add Admin Dialog */}
-      <Dialog open={!!showAddAdmin} onOpenChange={() => setShowAddAdmin(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Agregar Administrador</DialogTitle>
-            <DialogDescription>Cree una cuenta de administrador para este restaurante</DialogDescription>
-          </DialogHeader>
-          <form onSubmit={createAdmin} className="space-y-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-dark-200">Nombre completo *</label>
-              <Input value={adminForm.full_name} onChange={(e) => setAdminForm({ ...adminForm, full_name: e.target.value })} placeholder="Juan Pérez" required />
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-dark-200">Correo electrónico *</label>
-              <Input type="email" value={adminForm.email} onChange={(e) => setAdminForm({ ...adminForm, email: e.target.value })} placeholder="admin@restaurante.com" required />
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-dark-200">Contraseña *</label>
-              <Input type="password" value={adminForm.password} onChange={(e) => setAdminForm({ ...adminForm, password: e.target.value })} placeholder="Mínimo 6 caracteres" required minLength={6} />
-            </div>
-            <div className="flex justify-end gap-3 pt-2">
-              <Button variant="secondary" type="button" onClick={() => setShowAddAdmin(null)}>Cancelar</Button>
-              <Button type="submit" disabled={loading}>
-                {loading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
-                Crear Administrador
-              </Button>
-            </div>
-          </form>
-        </DialogContent>
-      </Dialog>
+              <p className="text-xs text-zinc-500 bg-dark-900 rounded-lg p-3">
+                📋 Se generará automáticamente un código de acceso de 6 caracteres (3 letras + 3 números)
+              </p>
+
+              <div className="flex gap-3 mt-2">
+                <button type="button" onClick={() => setShowCreateModal(false)} className="btn-outline flex-1">
+                  Cancelar
+                </button>
+                <button type="submit" disabled={!formName.trim() || creating} className="btn-gold flex-1">
+                  {creating ? 'Creando...' : 'Crear'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -1,371 +1,208 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { motion, AnimatePresence } from 'framer-motion'
 import { useAuth } from '@/hooks/useAuth'
-import { supabase } from '@/lib/supabase'
-import { Loader2, QrCode } from 'lucide-react'
 
-function Particle({ x, y, size, duration, delay }: {
-  x: number; y: number; size: number; duration: number; delay: number
-}) {
-  return (
-    <motion.div
-      style={{
-        position: 'absolute',
-        left: `${x}%`,
-        top: `${y}%`,
-        width: size,
-        height: size,
-        borderRadius: '50%',
-        background: 'radial-gradient(circle, rgba(251,146,60,0.5), transparent)',
-        pointerEvents: 'none',
-      }}
-      animate={{ y: [0, -20, 0], opacity: [0.06, 0.35, 0.06] }}
-      transition={{ duration, delay, repeat: Infinity, ease: 'easeInOut' }}
-    />
-  )
+// ─── Particle System ───
+interface Particle {
+  x: number; y: number; vx: number; vy: number
+  size: number; opacity: number; life: number; maxLife: number
 }
 
-const PARTICLES = Array.from({ length: 22 }, (_, i) => ({
-  id: i,
-  x: Math.random() * 100,
-  y: Math.random() * 100,
-  size: Math.random() * 7 + 3,
-  duration: Math.random() * 4 + 3,
-  delay: Math.random() * 3,
-}))
+function useParticles(canvasRef: React.RefObject<HTMLCanvasElement | null>) {
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
 
+    let animId: number
+    let particles: Particle[] = []
+    const maxParticles = 60
+
+    const resize = () => {
+      canvas.width = window.innerWidth
+      canvas.height = window.innerHeight
+    }
+    resize()
+    window.addEventListener('resize', resize)
+
+    const spawn = () => {
+      if (particles.length >= maxParticles) return
+      particles.push({
+        x: Math.random() * canvas.width,
+        y: Math.random() * canvas.height,
+        vx: (Math.random() - 0.5) * 0.3,
+        vy: (Math.random() - 0.5) * 0.3,
+        size: Math.random() * 2.5 + 0.5,
+        opacity: 0,
+        life: 0,
+        maxLife: Math.random() * 400 + 200,
+      })
+    }
+
+    const tick = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height)
+      spawn()
+      spawn()
+
+      particles = particles.filter((p) => p.life < p.maxLife)
+
+      for (const p of particles) {
+        p.x += p.vx
+        p.y += p.vy
+        p.life++
+
+        const progress = p.life / p.maxLife
+        p.opacity = progress < 0.1 ? progress * 10
+          : progress > 0.8 ? (1 - progress) * 5
+          : 1
+
+        ctx.beginPath()
+        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2)
+        ctx.fillStyle = `rgba(212, 168, 67, ${p.opacity * 0.35})`
+        ctx.fill()
+      }
+
+      animId = requestAnimationFrame(tick)
+    }
+
+    tick()
+    return () => {
+      cancelAnimationFrame(animId)
+      window.removeEventListener('resize', resize)
+    }
+  }, [canvasRef])
+}
+
+// ─── Login Page ───
 export default function Login() {
-  const [code, setCode] = useState('')
-  const [error, setError] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [shake, setShake] = useState(false)
-  const { signIn } = useAuth()
+  const { session, login, loading: authLoading } = useAuth()
   const navigate = useNavigate()
+  const canvasRef = useRef<HTMLCanvasElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  useEffect(() => {
-    const t = setTimeout(() => inputRef.current?.focus(), 800)
-    return () => clearTimeout(t)
-  }, [])
+  const [code, setCode] = useState('')
+  const [error, setError] = useState('')
+  const [submitting, setSubmitting] = useState(false)
 
-  const doRedirect = async () => {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (user) {
-      const { data: p } = await supabase.from('profiles').select('role').eq('id', user.id).single()
-      if (p) {
-        if (p.role === 'super_admin') navigate('/super-admin')
-        else if (p.role === 'restaurant_admin') navigate('/dashboard')
-        else navigate('/waiter')
+  useParticles(canvasRef)
+
+  // Redirect if already logged in
+  useEffect(() => {
+    if (authLoading) return
+    if (session) {
+      switch (session.role) {
+        case 'super_admin': navigate('/super-admin', { replace: true }); break
+        case 'restaurant_admin': navigate('/dashboard', { replace: true }); break
+        case 'waiter': navigate('/waiter', { replace: true }); break
       }
     }
-    setLoading(false)
-  }
+  }, [session, authLoading, navigate])
+
+  // Auto-focus
+  useEffect(() => {
+    setTimeout(() => inputRef.current?.focus(), 500)
+  }, [])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!code.trim()) return
+    if (!code.trim() || submitting) return
+
     setError('')
-    setLoading(true)
+    setSubmitting(true)
 
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('id, role')
-      .eq('pin', code.trim().toUpperCase())
-      .eq('is_active', true)
-      .single()
-
-    if (!profile) {
-      const parts = code.trim().split(':')
-      if (parts.length === 2) {
-        const { error: err } = await signIn(parts[0], parts[1])
-        if (!err) { await doRedirect(); return }
-      }
-      setError('Código incorrecto. Intenta de nuevo.')
-      setShake(true)
-      setTimeout(() => setShake(false), 600)
-      setLoading(false)
-      return
+    const result = await login(code)
+    if (!result.success) {
+      setError(result.error || 'Código no válido')
+      setSubmitting(false)
     }
+  }
 
-    if (profile.role === 'super_admin') navigate('/super-admin')
-    else if (profile.role === 'restaurant_admin') navigate('/dashboard')
-    else navigate('/waiter')
-    setLoading(false)
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-dark-950">
+        <div className="w-8 h-8 border-2 border-gold-400 border-t-transparent rounded-full animate-spin" />
+      </div>
+    )
   }
 
   return (
-    <div style={{
-      minHeight: '100vh',
-      background: '#07070f',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      overflow: 'hidden',
-      position: 'relative',
-    }}>
+    <div className="min-h-screen grid-bg flex items-center justify-center relative overflow-hidden">
+      {/* Particles */}
+      <canvas ref={canvasRef} className="particles-canvas" />
 
-      {/* Partículas */}
-      {PARTICLES.map(p => <Particle key={p.id} {...p} />)}
-
-      {/* Orbe central */}
-      <motion.div
-        style={{
-          position: 'absolute',
-          top: '50%', left: '50%',
-          transform: 'translate(-50%, -50%)',
-          width: 650, height: 650,
-          borderRadius: '50%',
-          background: 'radial-gradient(circle, rgba(251,146,60,0.07) 0%, rgba(249,115,22,0.03) 50%, transparent 70%)',
-          pointerEvents: 'none',
-        }}
-        animate={{ scale: [1, 1.12, 1], opacity: [0.7, 1, 0.7] }}
-        transition={{ duration: 5, repeat: Infinity, ease: 'easeInOut' }}
-      />
-
-      {/* Grid decorativo */}
-      <div style={{
-        position: 'absolute', inset: 0, opacity: 0.025, pointerEvents: 'none',
-        backgroundImage: 'linear-gradient(rgba(255,255,255,1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,1) 1px, transparent 1px)',
-        backgroundSize: '64px 64px',
-      }} />
-
-      {/* Contenedor principal */}
-      <motion.div
-        style={{
-          position: 'relative',
-          zIndex: 10,
-          width: '100%',
-          maxWidth: 360,
-          margin: '0 24px',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-        }}
-        initial={{ opacity: 0, y: 50, scale: 0.9 }}
-        animate={{ opacity: 1, y: 0, scale: 1 }}
-        transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
-      >
-
-        {/* === LOGO === */}
-        <motion.div
-          style={{ marginBottom: 28 }}
-          animate={{ y: [0, -8, 0] }}
-          transition={{ duration: 3.5, repeat: Infinity, ease: 'easeInOut' }}
-        >
-          <div style={{ position: 'relative' }}>
-            <motion.div
-              style={{
-                position: 'absolute',
-                inset: -12,
-                borderRadius: 28,
-                background: 'linear-gradient(135deg, rgba(251,146,60,0.5), rgba(249,115,22,0.3))',
-                filter: 'blur(20px)',
-              }}
-              animate={{ opacity: [0.4, 0.9, 0.4], scale: [0.9, 1.1, 0.9] }}
-              transition={{ duration: 2.5, repeat: Infinity, ease: 'easeInOut' }}
-            />
-            <div style={{
-              position: 'relative',
-              width: 90, height: 90,
-              borderRadius: 22,
-              background: 'linear-gradient(135deg, #fbbf24, #f97316)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              boxShadow: '0 20px 60px rgba(249,115,22,0.4)',
-            }}>
-              <QrCode style={{ width: 44, height: 44, color: 'white' }} strokeWidth={1.5} />
-            </div>
+      {/* Content */}
+      <div className="relative z-10 flex flex-col items-center animate-fade-in" style={{ animationDelay: '0.2s' }}>
+        {/* Logo */}
+        <div className="mb-6 animate-float">
+          <div
+            className="w-20 h-20 rounded-2xl flex items-center justify-center animate-pulse-glow"
+            style={{ background: 'linear-gradient(135deg, #D4A843, #E8BE5A)' }}
+          >
+            <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="#0A0A0B" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="3" width="7" height="7" rx="1" />
+              <rect x="14" y="3" width="7" height="7" rx="1" />
+              <rect x="3" y="14" width="7" height="7" rx="1" />
+              <circle cx="17.5" cy="17.5" r="3.5" />
+              <path d="M17.5 14v1" />
+              <path d="M17.5 20v1" />
+              <path d="M14 17.5h1" />
+              <path d="M20 17.5h1" />
+            </svg>
           </div>
-        </motion.div>
+        </div>
 
-        {/* === NOMBRE === */}
-        <motion.div
-          style={{ textAlign: 'center', marginBottom: 40 }}
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.2 }}
-        >
-          <h1 style={{
-            fontSize: 48, fontWeight: 900, lineHeight: 1,
-            letterSpacing: '-0.03em', color: 'white',
-            marginBottom: 10, margin: '0 0 10px 0',
-          }}>
-            Servi<span style={{
-              background: 'linear-gradient(135deg, #fbbf24, #f97316)',
-              WebkitBackgroundClip: 'text',
-              WebkitTextFillColor: 'transparent',
-            }}>QR</span>
-          </h1>
-          <p style={{
-            fontSize: 11, fontWeight: 700,
-            letterSpacing: '0.22em', color: 'rgba(255,255,255,0.3)',
-            textTransform: 'uppercase', margin: '8px 0 0 0',
-          }}>
-            Sistema de atención
-          </p>
-        </motion.div>
+        {/* Brand */}
+        <h1 className="text-4xl font-bold tracking-tight mb-1">
+          Servi<span className="text-gold-400">QR</span>
+        </h1>
+        <p className="text-xs uppercase tracking-[0.3em] text-zinc-500 mb-10">
+          Sistema de Atención
+        </p>
 
-        {/* === LABEL === */}
-        <motion.p
-          style={{
-            fontSize: 10, fontWeight: 700,
-            letterSpacing: '0.3em', textTransform: 'uppercase',
-            color: 'rgba(255,255,255,0.28)', textAlign: 'center',
-            marginBottom: 16,
-          }}
-          animate={{ opacity: [0.28, 0.55, 0.28] }}
-          transition={{ duration: 2.2, repeat: Infinity }}
-        >
+        {/* Code label */}
+        <p className="text-xs uppercase tracking-[0.25em] text-zinc-500 mb-4">
           Ingresa tu código
-        </motion.p>
+        </p>
 
-        {/* === FORMULARIO === */}
-        <motion.form
-          onSubmit={handleSubmit}
-          style={{ width: '100%' }}
-          initial={{ opacity: 0, y: 16 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.35 }}
-        >
-          {/* Card */}
-          <div style={{
-            borderRadius: 28,
-            padding: '28px 28px 28px 28px',
-            background: 'rgba(255,255,255,0.03)',
-            border: '1px solid rgba(255,255,255,0.08)',
-            boxShadow: '0 32px 80px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.06)',
-          }}>
+        {/* Form */}
+        <form onSubmit={handleSubmit} className="w-full max-w-sm">
+          <div className="glass-card p-6">
+            <input
+              ref={inputRef}
+              type="password"
+              value={code}
+              onChange={(e) => { setCode(e.target.value); setError('') }}
+              placeholder="• • • • • •"
+              maxLength={10}
+              className="w-full bg-dark-900 border border-dark-600 rounded-xl px-5 py-4 text-center text-lg tracking-[0.5em] text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-gold-500 transition-colors"
+            />
 
-            {/* Input */}
-            <motion.div
-              style={{ marginBottom: 20 }}
-              animate={shake ? { x: [-10, 10, -7, 7, -3, 3, 0] } : {}}
-              transition={{ duration: 0.4 }}
-            >
-              <div style={{
-                borderRadius: 18,
-                background: 'rgba(0,0,0,0.4)',
-                border: `1.5px solid ${error ? 'rgba(239,68,68,0.5)' : code ? 'rgba(251,146,60,0.4)' : 'rgba(255,255,255,0.08)'}`,
-                boxShadow: code && !error ? '0 0 0 4px rgba(251,146,60,0.06)' : 'none',
-                position: 'relative',
-                overflow: 'hidden',
-                transition: 'all 0.3s ease',
-              }}>
-                <input
-                  ref={inputRef}
-                  type="text"
-                  value={code}
-                  onChange={e => { setCode(e.target.value.toUpperCase()); setError('') }}
-                  maxLength={20}
-                  autoComplete="off"
-                  spellCheck={false}
-                  placeholder="· · · · · ·"
-                  style={{
-                    width: '100%',
-                    background: 'transparent',
-                    color: 'white',
-                    textAlign: 'center',
-                    fontSize: 26,
-                    fontWeight: 700,
-                    padding: '22px 24px',
-                    outline: 'none',
-                    border: 'none',
-                    letterSpacing: code ? '0.3em' : '0.12em',
-                    caretColor: '#f97316',
-                    boxSizing: 'border-box',
-                  }}
-                />
-                {code && (
-                  <motion.div
-                    style={{
-                      position: 'absolute', bottom: 0, left: 16, right: 16,
-                      height: 2, borderRadius: 2,
-                      background: 'linear-gradient(90deg, #fbbf24, #f97316)',
-                    }}
-                    initial={{ scaleX: 0 }}
-                    animate={{ scaleX: 1 }}
-                    transition={{ duration: 0.3 }}
-                  />
-                )}
-              </div>
-            </motion.div>
-
-            {/* Error */}
-            <AnimatePresence>
-              {error && (
-                <motion.p
-                  style={{
-                    fontSize: 12, color: 'rgba(248,113,113,1)',
-                    textAlign: 'center', margin: '0 0 16px 0', padding: '10px 16px',
-                    background: 'rgba(239,68,68,0.07)', borderRadius: 12,
-                    border: '1px solid rgba(239,68,68,0.15)',
-                  }}
-                  initial={{ opacity: 0, y: -6 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0 }}
-                >
-                  {error}
-                </motion.p>
-              )}
-            </AnimatePresence>
-
-            {/* Botón */}
-            <motion.button
+            <button
               type="submit"
-              disabled={loading || !code.trim()}
-              style={{
-                width: '100%', padding: '18px 24px',
-                borderRadius: 18, border: 'none', cursor: code && !loading ? 'pointer' : 'not-allowed',
-                background: 'linear-gradient(135deg, #fbbf24, #f97316)',
-                color: 'black', fontWeight: 700, fontSize: 16,
-                boxShadow: code && !loading ? '0 10px 35px rgba(249,115,22,0.45)' : 'none',
-                opacity: !code.trim() ? 0.45 : 1,
-                position: 'relative', overflow: 'hidden',
-                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-                transition: 'box-shadow 0.3s ease, opacity 0.3s ease',
-              }}
-              whileHover={{ scale: code && !loading ? 1.02 : 1 }}
-              whileTap={{ scale: code && !loading ? 0.97 : 1 }}
-              transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+              disabled={!code.trim() || submitting}
+              className="btn-gold w-full mt-4 py-4 text-base rounded-xl"
             >
-              {/* Shimmer animado */}
-              {!loading && code && (
-                <motion.div
-                  style={{
-                    position: 'absolute', inset: 0,
-                    background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent)',
-                    transform: 'skewX(-12deg)',
-                  }}
-                  animate={{ x: ['-120%', '200%'] }}
-                  transition={{ duration: 2, repeat: Infinity, repeatDelay: 1.5 }}
-                />
-              )}
-              {loading
-                ? <><Loader2 style={{ width: 18, height: 18, animation: 'spin 1s linear infinite' }} /> Verificando...</>
-                : 'Acceder'
-              }
-            </motion.button>
+              {submitting ? (
+                <span className="flex items-center justify-center gap-2">
+                  <span className="w-4 h-4 border-2 border-dark-900 border-t-transparent rounded-full animate-spin" />
+                  Verificando...
+                </span>
+              ) : 'Acceder'}
+            </button>
           </div>
-        </motion.form>
+        </form>
 
-        {/* Ayuda */}
-        <motion.p
-          style={{
-            marginTop: 20, fontSize: 11, fontWeight: 500,
-            color: 'rgba(255,255,255,0.16)', textAlign: 'center',
-          }}
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.7 }}
-        >
+        {/* Error */}
+        {error && (
+          <p className="mt-4 text-red-400 text-sm animate-fade-in">{error}</p>
+        )}
+
+        {/* Hint */}
+        <p className="mt-5 text-xs text-zinc-600 italic">
           Código maestro, de restaurante o de mesero
-        </motion.p>
-
-      </motion.div>
-
-      <style>{`
-        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-      `}</style>
+        </p>
+      </div>
     </div>
   )
 }

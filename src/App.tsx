@@ -3,7 +3,6 @@ import { AuthProvider, useAuth } from '@/hooks/useAuth'
 import { DashboardLayout } from '@/components/layout/DashboardLayout'
 import { Toaster } from 'sonner'
 
-import Landing from '@/pages/Landing'
 import Login from '@/pages/Login'
 import SuperAdminDashboard from '@/pages/SuperAdminDashboard'
 import SuperAdminRestaurants from '@/pages/SuperAdminRestaurants'
@@ -13,44 +12,23 @@ import WaiterManagement from '@/pages/WaiterManagement'
 import TableAssignments from '@/pages/TableAssignments'
 import LiveMonitor from '@/pages/LiveMonitor'
 import Analytics from '@/pages/Analytics'
+import PrintQRCodes from '@/pages/PrintQRCodes'
 import WaiterPanel from '@/pages/WaiterPanel'
 import CustomerRequest from '@/pages/CustomerRequest'
 import CustomerRating from '@/pages/CustomerRating'
-import PrintQRCodes from '@/pages/PrintQRCodes'
-
-function AuthRedirect() {
-  const { profile, loading } = useAuth()
-
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-dark-900">
-        <div className="w-8 h-8 border-2 border-gold-400 border-t-transparent rounded-full animate-spin" />
-      </div>
-    )
-  }
-
-  if (!profile) return <Navigate to="/login" replace />
-
-  switch (profile.role) {
-    case 'super_admin': return <Navigate to="/super-admin" replace />
-    case 'restaurant_admin': return <Navigate to="/dashboard" replace />
-    case 'waiter': return <Navigate to="/waiter" replace />
-    default: return <Navigate to="/login" replace />
-  }
-}
 
 function WaiterProtectedRoute() {
-  const { profile, loading } = useAuth()
+  const { session, loading } = useAuth()
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-dark-900">
+      <div className="min-h-screen flex items-center justify-center bg-dark-950">
         <div className="w-8 h-8 border-2 border-gold-400 border-t-transparent rounded-full animate-spin" />
       </div>
     )
   }
 
-  if (!profile || profile.role !== 'waiter') return <Navigate to="/login" replace />
+  if (!session || session.role !== 'restaurant_admin') return <Navigate to="/" replace />
   return <WaiterPanel />
 }
 
@@ -66,9 +44,6 @@ export default function App() {
           {/* Customer (public, no auth) */}
           <Route path="/r/:slug/mesa/:token" element={<CustomerRequest />} />
           <Route path="/r/:slug/mesa/:token/calificar/:requestId" element={<CustomerRating />} />
-
-          {/* Auth redirect */}
-          <Route path="/home" element={<AuthRedirect />} />
 
           {/* Super Admin */}
           <Route element={<DashboardLayout allowedRoles={['super_admin']} />}>
@@ -99,8 +74,8 @@ export default function App() {
           theme="dark"
           toastOptions={{
             style: {
-              background: '#1A1A1A',
-              border: '1px solid #2A2A2A',
+              background: '#1A1A1D',
+              border: '1px solid #232328',
               color: '#FAFAFA',
             },
           }}

@@ -1,167 +1,159 @@
-import { useEffect, useState } from 'react'
-import { motion } from 'framer-motion'
-import { supabase } from '@/lib/supabase'
+import { useState } from 'react'
+import { collection, addDoc, deleteDoc, doc, updateDoc } from 'firebase/firestore'
+import { db } from '@/lib/firebase'
 import { useAuth } from '@/hooks/useAuth'
-import { Card, CardContent } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Badge } from '@/components/ui/badge'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
-import { Plus, Trash2, Users, Loader2, UserCheck, UserX } from 'lucide-react'
-import type { Profile } from '@/lib/types'
+import { useCollection } from '@/hooks/useCollection'
+import type { Waiter } from '@/lib/types'
+import { Plus, Trash2, UserCheck, UserX } from 'lucide-react'
+import { toast } from 'sonner'
 
 export default function WaiterManagement() {
-  const { profile } = useAuth()
-  const [waiters, setWaiters] = useState<Profile[]>([])
-  const [showCreate, setShowCreate] = useState(false)
-  const [loading, setLoading] = useState(false)
-  const [form, setForm] = useState({ email: '', password: '', full_name: '' })
+  const { session } = useAuth()
+  const rid = session?.restaurantId || ''
+  const { data: waiters, loading } = useCollection<Waiter>(`restaurants/${rid}/waiters`, [], !!rid)
 
-  useEffect(() => {
-    if (profile?.restaurant_id) loadWaiters()
-  }, [profile])
+  const [showModal, setShowModal] = useState(false)
+  const [formName, setFormName] = useState('')
+  const [formPin, setFormPin] = useState('')
+  const [creating, setCreating] = useState(false)
 
-  async function loadWaiters() {
-    const { data } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('restaurant_id', profile!.restaurant_id!)
-      .eq('role', 'waiter')
-      .order('full_name')
-    setWaiters(data || [])
-  }
-
-  async function createWaiter(e: React.FormEvent) {
+  const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault()
-    setLoading(true)
-    const { data: authData, error: authError } = await supabase.auth.signUp({
-      email: form.email,
-      password: form.password,
-    })
-    if (authError || !authData.user) {
-      setLoading(false)
-      return
+    if (!formName.trim() || !formPin.trim() || creating) return
+    setCreating(true)
+    try {
+      await addDoc(collection(db, `restaurants/${rid}/waiters`), {
+        restaurant_id: rid,
+        name: formName.trim(),
+        pin: formPin.trim(),
+        is_active: true,
+        created_at: new Date().toISOString(),
+      })
+      toast.success(`Mesero "${formName}" creado`)
+      setShowModal(false)
+      setFormName('')
+      setFormPin('')
+    } catch (err) {
+      console.error(err)
+      toast.error('Error al crear mesero')
     }
-    await supabase.from('profiles').insert({
-      id: authData.user.id,
-      full_name: form.full_name,
-      role: 'waiter',
-      restaurant_id: profile!.restaurant_id!,
-    })
-    setForm({ email: '', password: '', full_name: '' })
-    setShowCreate(false)
-    loadWaiters()
-    setLoading(false)
+    setCreating(false)
   }
 
-  async function toggleActive(waiter: Profile) {
-    await supabase
-      .from('profiles')
-      .update({ is_active: !waiter.is_active })
-      .eq('id', waiter.id)
-    loadWaiters()
+  const toggleActive = async (w: Waiter) => {
+    try {
+      await updateDoc(doc(db, `restaurants/${rid}/waiters`, w.id), { is_active: !w.is_active })
+      toast.success(`${w.name} ${!w.is_active ? 'activado' : 'desactivado'}`)
+    } catch (err) {
+      console.error(err)
+    }
   }
 
-  async function deleteWaiter(id: string) {
-    if (!confirm('¿Eliminar este mesero? También se eliminarán sus asignaciones de mesas.')) return
-    await supabase.from('waiter_assignments').delete().eq('waiter_id', id)
-    await supabase.from('profiles').delete().eq('id', id)
-    loadWaiters()
+  const handleDelete = async (w: Waiter) => {
+    if (!confirm(`¿Eliminar a "${w.name}"?`)) return
+    try {
+      await deleteDoc(doc(db, `restaurants/${rid}/waiters`, w.id))
+      toast.success('Mesero eliminado')
+    } catch (err) {
+      console.error(err)
+      toast.error('Error al eliminar')
+    }
   }
 
   return (
-    <div className="space-y-8">
-      <div className="flex items-center justify-between">
+    <div className="animate-fade-in">
+      <div className="flex items-center justify-between mb-8">
         <div>
-          <h1 className="font-serif text-3xl font-bold gold-text">Meseros</h1>
-          <p className="text-dark-400 mt-1">Gestione el personal de servicio</p>
+          <h1 className="text-2xl font-bold">Meseros</h1>
+          <p className="text-sm text-zinc-500 mt-1">{waiters.filter(w => w.is_active).length} activos de {waiters.length}</p>
         </div>
-        <Button onClick={() => setShowCreate(true)} className="gap-2">
-          <Plus className="w-4 h-4" />
+        <button onClick={() => setShowModal(true)} className="btn-gold flex items-center gap-2">
+          <Plus size={16} />
           Nuevo Mesero
-        </Button>
+        </button>
       </div>
 
-      {waiters.length === 0 ? (
-        <Card className="glass">
-          <CardContent className="py-16 text-center">
-            <Users className="w-12 h-12 text-dark-500 mx-auto mb-4" />
-            <h3 className="text-lg font-medium text-dark-300">No hay meseros</h3>
-            <p className="text-dark-500 text-sm mt-1">Registre su primer mesero para asignarle mesas</p>
-          </CardContent>
-        </Card>
+      {loading ? (
+        <div className="flex justify-center py-20">
+          <div className="w-8 h-8 border-2 border-gold-400 border-t-transparent rounded-full animate-spin" />
+        </div>
+      ) : waiters.length === 0 ? (
+        <div className="text-center py-20 text-zinc-500">
+          <p className="text-lg mb-2">No hay meseros</p>
+          <p className="text-sm">Agrega el primero con el botón de arriba</p>
+        </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {waiters.map((w, i) => (
-            <motion.div
-              key={w.id}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: i * 0.05 }}
-            >
-              <Card className={`glass transition-all ${w.is_active ? 'hover:border-gold-500/30' : 'opacity-60'}`}>
-                <CardContent className="p-5">
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 rounded-full gold-gradient flex items-center justify-center text-lg font-bold text-dark-900">
-                      {w.full_name.charAt(0)}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium truncate">{w.full_name}</p>
-                      <Badge variant={w.is_active ? 'success' : 'secondary'} className="mt-1">
-                        {w.is_active ? 'Activo' : 'Inactivo'}
-                      </Badge>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => toggleActive(w)}
-                        className={w.is_active ? 'text-green-400 hover:text-yellow-400' : 'text-dark-400 hover:text-green-400'}
-                        title={w.is_active ? 'Desactivar' : 'Activar'}
-                      >
-                        {w.is_active ? <UserCheck className="w-4 h-4" /> : <UserX className="w-4 h-4" />}
-                      </Button>
-                      <Button variant="ghost" size="icon" className="text-dark-400 hover:text-red-400" onClick={() => deleteWaiter(w.id)}>
-                        <Trash2 className="w-4 h-4" />
-                      </Button>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </motion.div>
+          {waiters.map((w) => (
+            <div key={w.id} className={`stat-card flex items-center gap-4 ${!w.is_active ? 'opacity-50' : ''}`}>
+              <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold ${w.is_active ? 'bg-emerald-500/20 text-emerald-400' : 'bg-zinc-800 text-zinc-500'}`}>
+                {w.name.charAt(0).toUpperCase()}
+              </div>
+              <div className="flex-1">
+                <p className="font-semibold">{w.name}</p>
+                <p className="text-xs text-zinc-500">PIN: {w.pin}</p>
+              </div>
+              <div className="flex gap-1">
+                <button
+                  onClick={() => toggleActive(w)}
+                  className={`p-2 rounded-lg transition-colors ${w.is_active ? 'text-emerald-400 hover:bg-emerald-500/10' : 'text-zinc-500 hover:bg-zinc-800'}`}
+                  title={w.is_active ? 'Desactivar' : 'Activar'}
+                >
+                  {w.is_active ? <UserCheck size={16} /> : <UserX size={16} />}
+                </button>
+                <button
+                  onClick={() => handleDelete(w)}
+                  className="p-2 rounded-lg text-zinc-600 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                >
+                  <Trash2 size={16} />
+                </button>
+              </div>
+            </div>
           ))}
         </div>
       )}
 
-      <Dialog open={showCreate} onOpenChange={setShowCreate}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Nuevo Mesero</DialogTitle>
-            <DialogDescription>Cree una cuenta para el mesero</DialogDescription>
-          </DialogHeader>
-          <form onSubmit={createWaiter} className="space-y-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-dark-200">Nombre completo *</label>
-              <Input value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} placeholder="María García" required />
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-dark-200">Correo electrónico *</label>
-              <Input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="mesero@restaurante.com" required />
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-dark-200">Contraseña *</label>
-              <Input type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder="Mínimo 6 caracteres" required minLength={6} />
-            </div>
-            <div className="flex justify-end gap-3 pt-2">
-              <Button variant="secondary" type="button" onClick={() => setShowCreate(false)}>Cancelar</Button>
-              <Button type="submit" disabled={loading}>
-                {loading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
-                Crear Mesero
-              </Button>
-            </div>
-          </form>
-        </DialogContent>
-      </Dialog>
+      {/* Create Modal */}
+      {showModal && (
+        <div className="modal-overlay" onClick={() => setShowModal(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <h2 className="text-lg font-bold mb-5">Nuevo Mesero</h2>
+            <form onSubmit={handleCreate} className="flex flex-col gap-4">
+              <div>
+                <label className="text-xs text-zinc-400 mb-1.5 block">Nombre *</label>
+                <input
+                  type="text"
+                  value={formName}
+                  onChange={(e) => setFormName(e.target.value)}
+                  placeholder="Ej: Carlos López"
+                  className="input-dark"
+                  autoFocus
+                />
+              </div>
+              <div>
+                <label className="text-xs text-zinc-400 mb-1.5 block">PIN *</label>
+                <input
+                  type="text"
+                  value={formPin}
+                  onChange={(e) => setFormPin(e.target.value)}
+                  placeholder="Ej: 1234"
+                  maxLength={6}
+                  className="input-dark"
+                />
+                <p className="text-xs text-zinc-600 mt-1">PIN para identificar al mesero</p>
+              </div>
+              <div className="flex gap-3 mt-2">
+                <button type="button" onClick={() => setShowModal(false)} className="btn-outline flex-1">
+                  Cancelar
+                </button>
+                <button type="submit" disabled={!formName.trim() || !formPin.trim() || creating} className="btn-gold flex-1">
+                  {creating ? 'Creando...' : 'Crear'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

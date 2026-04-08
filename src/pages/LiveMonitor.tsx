@@ -1,178 +1,118 @@
-import { useEffect, useState, useCallback } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
-import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/hooks/useAuth'
-import { useRealtime } from '@/hooks/useRealtime'
-import { useSound } from '@/hooks/useSound'
-import { REQUEST_TYPES, REQUEST_STATUS, getTimeDiffSeconds, formatTime } from '@/lib/utils'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
-import { Radio, Clock, Bell, CheckCircle2, Eye } from 'lucide-react'
-import type { ServiceRequest, Table, Profile } from '@/lib/types'
+import { useCollection } from '@/hooks/useCollection'
+import { doc, updateDoc } from 'firebase/firestore'
+import { db } from '@/lib/firebase'
+import type { ServiceRequest, Table, Waiter } from '@/lib/types'
+import { REQUEST_TYPES, REQUEST_STATUS, getTimeDiffMinutes } from '@/lib/utils'
+import { toast } from 'sonner'
+import { Bell, Receipt, BookOpen, AlertTriangle, Check, Eye, ArrowRight } from 'lucide-react'
 
-interface EnrichedRequest extends ServiceRequest {
-  table?: Table
-  waiter?: Profile
-}
+const ICONS = { Bell, Receipt, BookOpen, AlertTriangle }
 
 export default function LiveMonitor() {
-  const { profile } = useAuth()
-  const { playNotification, playUrgent } = useSound()
-  const [requests, setRequests] = useState<EnrichedRequest[]>([])
-  const [tables, setTables] = useState<Table[]>([])
-  const [waiters, setWaiters] = useState<Profile[]>([])
-  const [, setTick] = useState(0)
+  const { session } = useAuth()
+  const rid = session?.restaurantId || ''
+  const { data: requests, loading } = useCollection<ServiceRequest>(`restaurants/${rid}/requests`, [], !!rid)
+  const { data: tables } = useCollection<Table>(`restaurants/${rid}/tables`, [], !!rid)
+  const { data: waiters } = useCollection<Waiter>(`restaurants/${rid}/waiters`, [], !!rid)
 
-  useEffect(() => {
-    if (profile?.restaurant_id) loadData()
-    const interval = setInterval(() => setTick(t => t + 1), 1000)
-    return () => clearInterval(interval)
-  }, [profile])
+  const active = requests
+    .filter(r => r.status !== 'completed')
+    .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
 
-  async function loadData() {
-    const rid = profile!.restaurant_id!
-    const [r, t, w] = await Promise.all([
-      supabase.from('service_requests').select('*').eq('restaurant_id', rid).in('status', ['pending', 'seen', 'in_progress']).order('created_at', { ascending: true }),
-      supabase.from('tables').select('*').eq('restaurant_id', rid),
-      supabase.from('profiles').select('*').eq('restaurant_id', rid).eq('role', 'waiter'),
-    ])
-    setTables(t.data || [])
-    setWaiters(w.data || [])
-    const tableMap = Object.fromEntries((t.data || []).map(t => [t.id, t]))
-    const waiterMap = Object.fromEntries((w.data || []).map(w => [w.id, w]))
-    setRequests((r.data || []).map(req => ({
-      ...req,
-      table: tableMap[req.table_id],
-      waiter: req.waiter_id ? waiterMap[req.waiter_id] : undefined,
-    })))
+  const updateStatus = async (req: ServiceRequest, newStatus: ServiceRequest['status']) => {
+    try {
+      const updates: Record<string, any> = { status: newStatus }
+      if (newStatus === 'seen') updates.seen_at = new Date().toISOString()
+      if (newStatus === 'in_progress') updates.attended_at = new Date().toISOString()
+      if (newStatus === 'completed') updates.completed_at = new Date().toISOString()
+
+      await updateDoc(doc(db, `restaurants/${rid}/requests`, req.id), updates)
+      toast.success(`Solicitud actualizada a: ${REQUEST_STATUS[newStatus].label}`)
+    } catch (err) {
+      console.error(err)
+      toast.error('Error al actualizar')
+    }
   }
 
-  const handleRealtimeChange = useCallback(() => {
-    loadData()
-    playNotification()
-  }, [profile?.restaurant_id])
-
-  useRealtime({
-    table: 'service_requests',
-    filter: `restaurant_id=eq.${profile?.restaurant_id}`,
-    onRecord: handleRealtimeChange,
-    enabled: !!profile?.restaurant_id,
-  })
-
-  async function updateStatus(id: string, status: string) {
-    const updates: Record<string, unknown> = { status }
-    if (status === 'seen') updates.seen_at = new Date().toISOString()
-    if (status === 'in_progress') updates.attended_at = new Date().toISOString()
-    if (status === 'completed') updates.completed_at = new Date().toISOString()
-
-    await supabase.from('service_requests').update(updates).eq('id', id)
-    loadData()
+  const getWaiterName = (id: string | null) => {
+    if (!id) return 'Sin asignar'
+    return waiters.find(w => w.id === id)?.name || 'Desconocido'
   }
-
-  const pendingCount = requests.filter(r => r.status === 'pending').length
 
   return (
-    <div className="space-y-8">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="font-serif text-3xl font-bold gold-text flex items-center gap-3">
-            <Radio className="w-8 h-8 text-red-400 animate-pulse" />
-            Monitor en Vivo
-          </h1>
-          <p className="text-dark-400 mt-1">Solicitudes activas en tiempo real</p>
-        </div>
-        {pendingCount > 0 && (
-          <Badge variant="danger" className="text-base px-4 py-2 pulse-gold">
-            {pendingCount} pendiente{pendingCount !== 1 ? 's' : ''}
-          </Badge>
-        )}
+    <div className="animate-fade-in">
+      <div className="mb-8">
+        <h1 className="text-2xl font-bold flex items-center gap-3">
+          <span className="relative flex h-3 w-3">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+            <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
+          </span>
+          Monitor En Vivo
+        </h1>
+        <p className="text-sm text-zinc-500 mt-1">{active.length} solicitudes activas</p>
       </div>
 
-      {requests.length === 0 ? (
-        <Card className="glass">
-          <CardContent className="py-16 text-center">
-            <CheckCircle2 className="w-12 h-12 text-green-400 mx-auto mb-4" />
-            <h3 className="text-lg font-medium text-dark-300">Todo en orden</h3>
-            <p className="text-dark-500 text-sm mt-1">No hay solicitudes pendientes en este momento</p>
-          </CardContent>
-        </Card>
+      {loading ? (
+        <div className="flex justify-center py-20">
+          <div className="w-8 h-8 border-2 border-gold-400 border-t-transparent rounded-full animate-spin" />
+        </div>
+      ) : active.length === 0 ? (
+        <div className="text-center py-20 text-zinc-500">
+          <p className="text-lg mb-2">🎉 Todo tranquilo</p>
+          <p className="text-sm">No hay solicitudes pendientes</p>
+        </div>
       ) : (
-        <div className="space-y-3">
-          <AnimatePresence mode="popLayout">
-            {requests.map((r) => {
-              const typeInfo = REQUEST_TYPES[r.type]
-              const statusInfo = REQUEST_STATUS[r.status]
-              const elapsed = getTimeDiffSeconds(r.created_at)
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {active.map((req) => {
+            const typeInfo = REQUEST_TYPES[req.type]
+            const statusInfo = REQUEST_STATUS[req.status]
+            const mins = getTimeDiffMinutes(req.created_at)
+            const Icon = ICONS[typeInfo.icon as keyof typeof ICONS] || Bell
 
-              return (
-                <motion.div
-                  key={r.id}
-                  layout
-                  initial={{ opacity: 0, x: -20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: 20 }}
-                  className={`rounded-2xl border p-5 ${
-                    r.status === 'pending' ? 'glass border-gold-500/30 shake' :
-                    r.status === 'seen' ? 'bg-dark-800 border-blue-500/30' :
-                    'bg-dark-800 border-dark-700'
-                  }`}
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-4">
-                      <div className={`w-14 h-14 rounded-xl flex items-center justify-center text-xl font-bold ${
-                        r.status === 'pending' ? 'bg-gold-500/20 gold-text' : 'bg-dark-700 text-dark-300'
-                      }`}>
-                        {r.table?.number || '?'}
-                      </div>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <p className="font-semibold">{typeInfo?.label || r.type}</p>
-                          <Badge variant={
-                            r.status === 'pending' ? 'warning' :
-                            r.status === 'seen' ? 'info' : 'secondary'
-                          }>
-                            {statusInfo?.label || r.status}
-                          </Badge>
-                        </div>
-                        <div className="flex items-center gap-3 mt-1 text-sm text-dark-400">
-                          <span className="flex items-center gap-1">
-                            <Clock className="w-3 h-3" />
-                            {formatTime(elapsed)}
-                          </span>
-                          {r.waiter && (
-                            <span>Mesero: {r.waiter.full_name}</span>
-                          )}
-                          {r.customer_note && (
-                            <span className="text-dark-300">"{r.customer_note}"</span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {r.status === 'pending' && (
-                        <Button size="sm" variant="outline" onClick={() => updateStatus(r.id, 'seen')} className="gap-1">
-                          <Eye className="w-3 h-3" />
-                          Visto
-                        </Button>
-                      )}
-                      {(r.status === 'pending' || r.status === 'seen') && (
-                        <Button size="sm" variant="outline" onClick={() => updateStatus(r.id, 'in_progress')} className="gap-1">
-                          En Camino
-                        </Button>
-                      )}
-                      {r.status !== 'completed' && (
-                        <Button size="sm" variant="success" onClick={() => updateStatus(r.id, 'completed')} className="gap-1">
-                          <CheckCircle2 className="w-3 h-3" />
-                          Completar
-                        </Button>
-                      )}
+            return (
+              <div key={req.id} className={`stat-card border-l-4 ${req.status === 'pending' ? 'border-l-yellow-500' : req.status === 'seen' ? 'border-l-blue-500' : 'border-l-indigo-500'}`}>
+                <div className="flex items-start justify-between mb-3">
+                  <div className="flex items-center gap-3">
+                    <Icon size={20} className={typeInfo.color} />
+                    <div>
+                      <p className="font-semibold">Mesa {req.table_number}</p>
+                      <p className="text-xs text-zinc-500">{typeInfo.label}</p>
                     </div>
                   </div>
-                </motion.div>
-              )
-            })}
-          </AnimatePresence>
+                  <div className="text-right">
+                    <span className={`badge ${statusInfo.color} text-white text-[10px]`}>{statusInfo.label}</span>
+                    <p className="text-xs text-zinc-500 mt-1">{mins} min</p>
+                  </div>
+                </div>
+
+                {req.customer_note && (
+                  <p className="text-sm text-zinc-400 bg-dark-900 rounded-lg p-2 mb-3 italic">"{req.customer_note}"</p>
+                )}
+
+                <div className="flex items-center justify-between">
+                  <p className="text-xs text-zinc-500">👤 {getWaiterName(req.waiter_id)}</p>
+                  <div className="flex gap-2">
+                    {req.status === 'pending' && (
+                      <button onClick={() => updateStatus(req, 'seen')} className="btn-outline text-xs py-1.5 px-3 flex items-center gap-1">
+                        <Eye size={12} /> Visto
+                      </button>
+                    )}
+                    {(req.status === 'pending' || req.status === 'seen') && (
+                      <button onClick={() => updateStatus(req, 'in_progress')} className="btn-outline text-xs py-1.5 px-3 flex items-center gap-1 border-blue-500/30 text-blue-400">
+                        <ArrowRight size={12} /> En Camino
+                      </button>
+                    )}
+                    {req.status !== 'completed' && (
+                      <button onClick={() => updateStatus(req, 'completed')} className="btn-gold text-xs py-1.5 px-3 flex items-center gap-1">
+                        <Check size={12} /> Atendido
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )
+          })}
         </div>
       )}
     </div>
