@@ -186,7 +186,7 @@ export default function TableManagement() {
             {/* QR Code Preview */}
             <div className="bg-white rounded-xl p-4 flex flex-col items-center mb-5" id={`qr-print-${selectedTable.id}`}>
               <QRCodeSVG
-                value={`${window.location.origin}/r/${(session?.restaurantName || rid).toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')}mesa/${selectedTable.qr_token}`}
+                value={`${window.location.origin}/r/${rid}/mesa/${selectedTable.qr_token}`}
                 size={140}
                 level="H"
                 includeMargin
@@ -199,8 +199,7 @@ export default function TableManagement() {
               onClick={() => {
                 const printWindow = window.open('', '_blank', 'width=400,height=500')
                 if (!printWindow) return
-                const slug = (session?.restaurantName || rid).toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')
-                const qrUrl = `${window.location.origin}/r/${slug}/mesa/${selectedTable.qr_token}`
+                const qrUrl = `${window.location.origin}/r/${rid}/mesa/${selectedTable.qr_token}`
                 printWindow.document.write(`
                   <html><head><title>QR Mesa ${selectedTable.number}</title>
                   <style>

@@ -14,12 +14,9 @@ export default function PrintQRCodes() {
   const sortedTables = [...tables].sort((a, b) => a.number - b.number)
   const baseUrl = window.location.origin
 
-  // Build QR URL: /r/{slug}/mesa/{qr_token}
+  // Build QR URL: /r/{restaurantId}/mesa/{qr_token}
   const getQRUrl = (table: Table) => {
-    const slug = session?.restaurantName
-      ? session.restaurantName.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')
-      : rid
-    return `${baseUrl}/r/${slug}/mesa/${table.qr_token}`
+    return `${baseUrl}/r/${rid}/mesa/${table.qr_token}`
   }
 
   return (

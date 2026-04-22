@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { collection, query, where, getDocs, addDoc } from 'firebase/firestore'
+import { collection, query, where, getDocs, addDoc, doc, getDoc } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
 import type { Table } from '@/lib/types'
 import { REQUEST_TYPES } from '@/lib/utils'
@@ -35,15 +35,31 @@ export default function CustomerRequest() {
   useEffect(() => {
     const init = async () => {
       try {
+        let rDocId = ''
+        let rName = ''
+
+        // Try 1: lookup by slug field
         const rq = query(collection(db, 'restaurants'), where('slug', '==', slug))
         const rSnap = await getDocs(rq)
-        if (rSnap.empty) { setNotFound(true); setLoadingInit(false); return }
 
-        const rDoc = rSnap.docs[0]
-        setRestaurantId(rDoc.id)
-        setRestaurantName(rDoc.data().name)
+        if (!rSnap.empty) {
+          rDocId = rSnap.docs[0].id
+          rName = rSnap.docs[0].data().name
+        } else {
+          // Try 2: direct document ID lookup (QRs use restaurant ID)
+          const directDoc = await getDoc(doc(db, 'restaurants', slug!))
+          if (directDoc.exists()) {
+            rDocId = directDoc.id
+            rName = directDoc.data().name
+          } else {
+            setNotFound(true); setLoadingInit(false); return
+          }
+        }
 
-        const tq = query(collection(db, `restaurants/${rDoc.id}/tables`), where('qr_token', '==', token))
+        setRestaurantId(rDocId)
+        setRestaurantName(rName)
+
+        const tq = query(collection(db, `restaurants/${rDocId}/tables`), where('qr_token', '==', token))
         const tSnap = await getDocs(tq)
         if (tSnap.empty) { setNotFound(true); setLoadingInit(false); return }
 
