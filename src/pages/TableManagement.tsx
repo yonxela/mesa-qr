@@ -1,13 +1,14 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { collection, addDoc, deleteDoc, doc, updateDoc } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
 import { useAuth } from '@/hooks/useAuth'
 import { useCollection } from '@/hooks/useCollection'
 import { generateQRToken, TABLE_STATUS } from '@/lib/utils'
 import type { Table, Waiter } from '@/lib/types'
-import { Plus, Trash2, Printer, User, X, UserCheck } from 'lucide-react'
+import { Plus, Trash2, Printer, User, X, UserCheck, QrCode } from 'lucide-react'
 import { toast } from 'sonner'
 import { useNavigate } from 'react-router-dom'
+import { QRCodeSVG } from 'qrcode.react'
 
 export default function TableManagement() {
   const { session } = useAuth()
@@ -175,12 +176,59 @@ export default function TableManagement() {
             <div className="flex items-center justify-between mb-5">
               <div>
                 <h2 className="text-lg font-bold">Mesa {selectedTable.number}</h2>
-                <p className="text-xs text-zinc-500 mt-0.5">Asignar mesero responsable</p>
+                <p className="text-xs text-zinc-500 mt-0.5">Gestionar mesa</p>
               </div>
               <button onClick={() => setSelectedTable(null)} className="p-2 rounded-lg text-zinc-500 hover:text-white hover:bg-zinc-800 transition-colors">
                 <X size={18} />
               </button>
             </div>
+
+            {/* QR Code Preview */}
+            <div className="bg-white rounded-xl p-4 flex flex-col items-center mb-5" id={`qr-print-${selectedTable.id}`}>
+              <QRCodeSVG
+                value={`${window.location.origin}/r/${(session?.restaurantName || rid).toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')}mesa/${selectedTable.qr_token}`}
+                size={140}
+                level="H"
+                includeMargin
+              />
+              <p className="text-black font-bold text-sm mt-1">Mesa {selectedTable.number}</p>
+              <p className="text-gray-500 text-[10px]">{session?.restaurantName}</p>
+            </div>
+
+            <button
+              onClick={() => {
+                const printWindow = window.open('', '_blank', 'width=400,height=500')
+                if (!printWindow) return
+                const slug = (session?.restaurantName || rid).toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')
+                const qrUrl = `${window.location.origin}/r/${slug}/mesa/${selectedTable.qr_token}`
+                printWindow.document.write(`
+                  <html><head><title>QR Mesa ${selectedTable.number}</title>
+                  <style>
+                    body { display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:100vh; margin:0; font-family:system-ui,sans-serif; }
+                    .card { text-align:center; padding:40px; }
+                    h2 { margin:16px 0 4px; font-size:24px; }
+                    p { color:#666; margin:0; font-size:14px; }
+                    .scan { font-size:11px; color:#999; margin-top:8px; }
+                  </style></head><body>
+                  <div class="card">
+                    <img src="https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(qrUrl)}" width="250" height="250" />
+                    <h2>Mesa ${selectedTable.number}</h2>
+                    <p>${session?.restaurantName || ''}</p>
+                    <p class="scan">Escanea para solicitar servicio</p>
+                  </div>
+                  <script>setTimeout(()=>{window.print();window.close()},500)<\/script>
+                  </body></html>
+                `)
+                printWindow.document.close()
+              }}
+              className="btn-outline w-full flex items-center justify-center gap-2 mb-5"
+            >
+              <Printer size={16} />
+              Imprimir QR de esta mesa
+            </button>
+
+            {/* Waiter assignment section */}
+            <p className="text-xs text-zinc-500 font-medium mb-3 uppercase tracking-wider">Mesero Responsable</p>
 
             <div className="space-y-2 max-h-[320px] overflow-y-auto">
               {/* Option: No waiter */}
