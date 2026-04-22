@@ -71,7 +71,25 @@ export function DashboardLayout({ allowedRoles }: Props) {
 
         {/* Nav Links */}
         <nav className="flex flex-col gap-1 flex-1">
-          {links.map((link) => (
+          {/* En Vivo first for restaurant admin */}
+          {session.role !== 'super_admin' && (
+            <>
+              <NavLink
+                to="/dashboard/live"
+                className={({ isActive }) =>
+                  `sidebar-link ${isActive ? 'active' : ''}`
+                }
+              >
+                <div className="relative">
+                  <Radio size={18} />
+                  <span className="absolute -top-1 -right-1 w-2 h-2 bg-emerald-400 rounded-full animate-pulse" />
+                </div>
+                En Vivo
+              </NavLink>
+              <div className="border-t border-zinc-800 my-2" />
+            </>
+          )}
+          {links.filter(l => l.to !== '/dashboard/live').map((link) => (
             <NavLink
               key={link.to}
               to={link.to}
