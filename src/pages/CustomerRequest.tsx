@@ -3,17 +3,48 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { collection, query, where, getDocs, addDoc, doc, getDoc } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
 import type { Table } from '@/lib/types'
-import { REQUEST_TYPES } from '@/lib/utils'
-import { Bell, Receipt, BookOpen, AlertTriangle, Send, Star, ChevronRight } from 'lucide-react'
+import { Bell, Receipt, BookOpen, AlertTriangle, Send, Star, Check } from 'lucide-react'
 
-const TYPE_CONFIG = {
-  attention: { icon: Bell, label: 'Solicitar Mesero', desc: 'Un mesero irá a tu mesa', gradient: 'from-amber-500 to-orange-600', bg: 'bg-amber-500/10', text: 'text-amber-400' },
-  bill: { icon: Receipt, label: 'Pedir la Cuenta', desc: 'Te llevaremos la cuenta', gradient: 'from-emerald-500 to-teal-600', bg: 'bg-emerald-500/10', text: 'text-emerald-400' },
-  menu: { icon: BookOpen, label: 'Necesito el Menú', desc: 'Te llevaremos un menú', gradient: 'from-blue-500 to-indigo-600', bg: 'bg-blue-500/10', text: 'text-blue-400' },
-  complaint: { icon: AlertTriangle, label: 'Tengo una Queja', desc: 'Atenderemos tu inquietud', gradient: 'from-red-500 to-rose-600', bg: 'bg-red-500/10', text: 'text-red-400' },
-} as const
+const TYPE_CONFIG = [
+  {
+    key: 'attention' as const,
+    icon: Bell,
+    label: 'Mesero',
+    desc: 'Solicitar atención',
+    emoji: '🔔',
+    gradient: 'linear-gradient(135deg, #F59E0B, #D97706)',
+    glow: 'rgba(245,158,11,0.3)',
+  },
+  {
+    key: 'bill' as const,
+    icon: Receipt,
+    label: 'La Cuenta',
+    desc: 'Pedir la cuenta',
+    emoji: '💰',
+    gradient: 'linear-gradient(135deg, #10B981, #059669)',
+    glow: 'rgba(16,185,129,0.3)',
+  },
+  {
+    key: 'menu' as const,
+    icon: BookOpen,
+    label: 'Menú',
+    desc: 'Necesito un menú',
+    emoji: '📖',
+    gradient: 'linear-gradient(135deg, #6366F1, #4F46E5)',
+    glow: 'rgba(99,102,241,0.3)',
+  },
+  {
+    key: 'complaint' as const,
+    icon: AlertTriangle,
+    label: 'Queja',
+    desc: 'Reportar un problema',
+    emoji: '⚠️',
+    gradient: 'linear-gradient(135deg, #EF4444, #DC2626)',
+    glow: 'rgba(239,68,68,0.3)',
+  },
+] as const
 
-type RequestKey = keyof typeof TYPE_CONFIG
+type RequestKey = typeof TYPE_CONFIG[number]['key']
 
 export default function CustomerRequest() {
   const { slug, token } = useParams()
@@ -31,14 +62,12 @@ export default function CustomerRequest() {
   const [submitted, setSubmitted] = useState(false)
   const [submittedId, setSubmittedId] = useState('')
 
-  // Find restaurant and table
   useEffect(() => {
     const init = async () => {
       try {
         let rDocId = ''
         let rName = ''
 
-        // Try 1: lookup by slug field
         const rq = query(collection(db, 'restaurants'), where('slug', '==', slug))
         const rSnap = await getDocs(rq)
 
@@ -46,7 +75,6 @@ export default function CustomerRequest() {
           rDocId = rSnap.docs[0].id
           rName = rSnap.docs[0].data().name
         } else {
-          // Try 2: direct document ID lookup (QRs use restaurant ID)
           const directDoc = await getDoc(doc(db, 'restaurants', slug!))
           if (directDoc.exists()) {
             rDocId = directDoc.id
@@ -103,10 +131,10 @@ export default function CustomerRequest() {
   // ─── Loading ───
   if (loadingInit) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-dark-950">
-        <div className="flex flex-col items-center gap-4">
-          <div className="w-10 h-10 border-2 border-gold-400 border-t-transparent rounded-full animate-spin" />
-          <p className="text-sm text-zinc-500">Cargando mesa...</p>
+      <div style={styles.screen}>
+        <div style={styles.loadingContainer}>
+          <div style={styles.spinner} />
+          <p style={{ color: '#999', fontSize: 14, marginTop: 16 }}>Cargando...</p>
         </div>
       </div>
     )
@@ -115,13 +143,11 @@ export default function CustomerRequest() {
   // ─── Not Found ───
   if (notFound) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-dark-950 p-6">
-        <div className="text-center max-w-xs">
-          <div className="w-20 h-20 rounded-2xl bg-red-500/10 flex items-center justify-center mx-auto mb-5">
-            <AlertTriangle size={36} className="text-red-400" />
-          </div>
-          <h1 className="text-xl font-bold mb-2">Mesa no encontrada</h1>
-          <p className="text-sm text-zinc-500">El código QR no es válido o la mesa fue eliminada.</p>
+      <div style={styles.screen}>
+        <div style={{ textAlign: 'center', padding: 32 }}>
+          <div style={{ fontSize: 56, marginBottom: 16 }}>😕</div>
+          <h1 style={{ color: '#fff', fontSize: 22, fontWeight: 700, marginBottom: 8 }}>Mesa no encontrada</h1>
+          <p style={{ color: '#888', fontSize: 14 }}>El código QR no es válido o ha expirado.</p>
         </div>
       </div>
     )
@@ -130,29 +156,37 @@ export default function CustomerRequest() {
   // ─── Success ───
   if (submitted) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-dark-950 p-6">
-        <div className="text-center animate-fade-in max-w-sm w-full">
-          {/* Success animation */}
-          <div className="relative w-24 h-24 mx-auto mb-6">
-            <div className="absolute inset-0 rounded-full bg-emerald-500/20 animate-ping" style={{ animationDuration: '2s' }} />
-            <div className="relative w-24 h-24 rounded-full bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center shadow-lg shadow-emerald-500/25">
-              <Send size={36} className="text-white" />
-            </div>
+      <div style={styles.screen}>
+        <div style={{ textAlign: 'center', padding: 32, width: '100%', maxWidth: 380 }}>
+          <div style={{
+            width: 100, height: 100, borderRadius: '50%',
+            background: 'linear-gradient(135deg, #10B981, #059669)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            margin: '0 auto 24px',
+            boxShadow: '0 0 40px rgba(16,185,129,0.3), 0 0 80px rgba(16,185,129,0.1)',
+            animation: 'pulse 2s ease-in-out infinite',
+          }}>
+            <Check size={48} color="#fff" strokeWidth={3} />
           </div>
-
-          <h1 className="text-2xl font-bold mb-2">¡Listo!</h1>
-          <p className="text-zinc-400 mb-8">Tu mesero ha sido notificado y vendrá a tu mesa pronto.</p>
-
-          <div className="flex flex-col gap-3">
+          <h1 style={{ color: '#fff', fontSize: 26, fontWeight: 800, marginBottom: 8 }}>¡Solicitud Enviada!</h1>
+          <p style={{ color: '#999', fontSize: 15, marginBottom: 32, lineHeight: 1.5 }}>
+            Tu mesero ha sido notificado<br />y vendrá pronto a tu mesa.
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <button
               onClick={() => { setSubmitted(false); setSelectedType(null); setNote('') }}
-              className="w-full py-3.5 rounded-2xl border border-zinc-700 text-zinc-300 font-medium hover:bg-zinc-800/50 transition-all active:scale-[0.98]"
+              style={{
+                ...styles.secondaryBtn,
+              }}
             >
               Hacer otra solicitud
             </button>
             <button
               onClick={() => navigate(`/r/${slug}/mesa/${token}/calificar/${submittedId}`)}
-              className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-gold-500 to-gold-600 text-dark-950 font-bold flex items-center justify-center gap-2 hover:shadow-lg hover:shadow-gold-500/25 transition-all active:scale-[0.98]"
+              style={{
+                ...styles.primaryBtn,
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+              }}
             >
               <Star size={18} />
               Calificar Servicio
@@ -163,90 +197,213 @@ export default function CustomerRequest() {
     )
   }
 
-  // ─── Main Request Form ───
+  // ─── Main ───
   return (
-    <div className="min-h-screen bg-dark-950 flex flex-col">
-      {/* Hero header */}
-      <div className="pt-12 pb-8 px-6 text-center">
-        <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-zinc-800/80 border border-zinc-700/50 mb-4">
-          <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-          <span className="text-[11px] text-zinc-400 uppercase tracking-widest font-medium">{restaurantName}</span>
+    <div style={styles.screen}>
+      <div style={{ width: '100%', maxWidth: 440, padding: '0 20px' }}>
+        {/* Header */}
+        <div style={{ textAlign: 'center', paddingTop: 48, paddingBottom: 36 }}>
+          <div style={{
+            display: 'inline-flex', alignItems: 'center', gap: 6,
+            padding: '6px 14px', borderRadius: 20,
+            background: 'rgba(255,255,255,0.08)',
+            backdropFilter: 'blur(10px)',
+            border: '1px solid rgba(255,255,255,0.06)',
+            marginBottom: 16,
+          }}>
+            <span style={{ fontSize: 11, color: '#aaa', letterSpacing: 1.5, textTransform: 'uppercase', fontWeight: 600 }}>
+              {restaurantName}
+            </span>
+          </div>
+          <h1 style={{
+            color: '#fff', fontSize: 42, fontWeight: 800,
+            letterSpacing: -1, lineHeight: 1,
+            marginBottom: 8,
+          }}>
+            Mesa {table?.number}
+          </h1>
+          <p style={{ color: '#666', fontSize: 15, fontWeight: 400 }}>¿Qué necesitas?</p>
         </div>
-        <h1 className="text-3xl font-bold mb-1">Mesa {table?.number}</h1>
-        <p className="text-zinc-500 text-sm">Selecciona lo que necesitas</p>
-      </div>
 
-      {/* Options */}
-      <div className="flex-1 px-5 pb-6">
-        <div className="space-y-3 max-w-md mx-auto">
-          {(Object.entries(TYPE_CONFIG) as [RequestKey, typeof TYPE_CONFIG[RequestKey]][]).map(([key, config]) => {
-            const Icon = config.icon
-            const selected = selectedType === key
+        {/* Cards Grid */}
+        <div style={{
+          display: 'grid', gridTemplateColumns: '1fr 1fr',
+          gap: 14,
+          marginBottom: 20,
+        }}>
+          {TYPE_CONFIG.map((item, i) => {
+            const selected = selectedType === item.key
             return (
               <button
-                key={key}
-                onClick={() => setSelectedType(selected ? null : key)}
-                className={`w-full flex items-center gap-4 p-4 rounded-2xl border transition-all duration-200 text-left active:scale-[0.98] ${
-                  selected
-                    ? 'border-gold-500/50 bg-gold-500/5 shadow-lg shadow-gold-500/5'
-                    : 'border-zinc-800 bg-zinc-900/50 hover:border-zinc-700'
-                }`}
+                key={item.key}
+                onClick={() => setSelectedType(selected ? null : item.key)}
+                style={{
+                  position: 'relative',
+                  padding: 0,
+                  border: 'none',
+                  borderRadius: 20,
+                  overflow: 'hidden',
+                  cursor: 'pointer',
+                  transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+                  transform: selected ? 'scale(1.03)' : 'scale(1)',
+                  WebkitTapHighlightColor: 'transparent',
+                }}
               >
-                <div className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 ${
-                  selected ? 'bg-gradient-to-br ' + config.gradient : config.bg
-                }`}>
-                  <Icon size={22} className={selected ? 'text-white' : config.text} />
+                <div style={{
+                  background: selected ? item.gradient : 'rgba(255,255,255,0.04)',
+                  border: selected ? 'none' : '1px solid rgba(255,255,255,0.08)',
+                  borderRadius: 20,
+                  padding: '28px 16px 22px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: 10,
+                  boxShadow: selected ? `0 8px 32px ${item.glow}` : 'none',
+                  transition: 'all 0.25s ease',
+                }}>
+                  <span style={{ fontSize: 36, lineHeight: 1 }}>{item.emoji}</span>
+                  <span style={{
+                    color: selected ? '#fff' : '#e5e5e5',
+                    fontSize: 15, fontWeight: 700,
+                    lineHeight: 1.2,
+                  }}>
+                    {item.label}
+                  </span>
+                  <span style={{
+                    color: selected ? 'rgba(255,255,255,0.8)' : '#777',
+                    fontSize: 12, fontWeight: 400,
+                    lineHeight: 1.3,
+                  }}>
+                    {item.desc}
+                  </span>
                 </div>
-                <div className="flex-1 min-w-0">
-                  <p className={`font-semibold text-[15px] ${selected ? 'text-white' : 'text-zinc-200'}`}>{config.label}</p>
-                  <p className="text-xs text-zinc-500 mt-0.5">{config.desc}</p>
-                </div>
-                <ChevronRight size={18} className={`shrink-0 transition-transform ${selected ? 'text-gold-400 rotate-90' : 'text-zinc-600'}`} />
+                {selected && (
+                  <div style={{
+                    position: 'absolute', top: 10, right: 10,
+                    width: 22, height: 22, borderRadius: '50%',
+                    background: 'rgba(255,255,255,0.3)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  }}>
+                    <Check size={14} color="#fff" strokeWidth={3} />
+                  </div>
+                )}
               </button>
             )
           })}
         </div>
 
-        {/* Note (appears when type selected) */}
+        {/* Note */}
         {selectedType && (
-          <div className="max-w-md mx-auto mt-4 animate-fade-in">
+          <div style={{ marginBottom: 16 }}>
             <textarea
               value={note}
               onChange={(e) => setNote(e.target.value)}
-              placeholder="¿Algo más que quieras agregar? (opcional)"
+              placeholder="Agrega un comentario (opcional)"
               rows={2}
-              className="w-full px-4 py-3 rounded-2xl bg-zinc-900 border border-zinc-800 text-sm text-zinc-200 placeholder-zinc-600 resize-none focus:outline-none focus:border-zinc-600 transition-colors"
+              style={{
+                width: '100%',
+                padding: '14px 16px',
+                borderRadius: 16,
+                border: '1px solid rgba(255,255,255,0.08)',
+                background: 'rgba(255,255,255,0.04)',
+                color: '#e5e5e5',
+                fontSize: 14,
+                resize: 'none',
+                outline: 'none',
+                fontFamily: 'inherit',
+                boxSizing: 'border-box',
+              }}
             />
           </div>
         )}
-      </div>
 
-      {/* Fixed bottom button */}
-      <div className="sticky bottom-0 p-5 pb-8 bg-gradient-to-t from-dark-950 via-dark-950 to-transparent">
-        <div className="max-w-md mx-auto">
-          <button
-            onClick={handleSubmit}
-            disabled={!selectedType || submitting}
-            className={`w-full py-4 rounded-2xl font-bold text-base flex items-center justify-center gap-2 transition-all duration-300 active:scale-[0.97] ${
-              selectedType
-                ? 'bg-gradient-to-r from-gold-500 to-gold-600 text-dark-950 shadow-lg shadow-gold-500/25 hover:shadow-xl hover:shadow-gold-500/30'
-                : 'bg-zinc-800 text-zinc-600 cursor-not-allowed'
-            }`}
-          >
-            {submitting ? (
-              <>
-                <span className="w-5 h-5 border-2 border-dark-900 border-t-transparent rounded-full animate-spin" />
-                Enviando...
-              </>
-            ) : (
-              <>
-                <Send size={18} />
-                Enviar Solicitud
-              </>
-            )}
-          </button>
-        </div>
+        {/* Submit */}
+        <button
+          onClick={handleSubmit}
+          disabled={!selectedType || submitting}
+          style={{
+            ...styles.primaryBtn,
+            opacity: selectedType ? 1 : 0.3,
+            cursor: selectedType ? 'pointer' : 'not-allowed',
+            transform: selectedType ? 'scale(1)' : 'scale(0.98)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
+            marginBottom: 32,
+          }}
+        >
+          {submitting ? (
+            <>
+              <div style={{ ...styles.spinner, width: 20, height: 20, borderWidth: 2 }} />
+              Enviando...
+            </>
+          ) : (
+            <>
+              <Send size={18} />
+              Enviar Solicitud
+            </>
+          )}
+        </button>
+
+        {/* Branding */}
+        <p style={{
+          textAlign: 'center', color: '#444', fontSize: 11,
+          paddingBottom: 24, letterSpacing: 0.5,
+        }}>
+          Powered by <span style={{ color: '#D4A843', fontWeight: 600 }}>ServiQR</span>
+        </p>
       </div>
     </div>
   )
+}
+
+// ─── Inline Styles ───
+const styles: Record<string, React.CSSProperties> = {
+  screen: {
+    minHeight: '100vh',
+    background: 'linear-gradient(180deg, #0C0C0E 0%, #111113 50%, #0A0A0C 100%)',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+  },
+  loadingContainer: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+  },
+  spinner: {
+    width: 36,
+    height: 36,
+    border: '3px solid rgba(212,168,67,0.2)',
+    borderTopColor: '#D4A843',
+    borderRadius: '50%',
+    animation: 'spin 0.8s linear infinite',
+  },
+  primaryBtn: {
+    width: '100%',
+    padding: '16px 24px',
+    borderRadius: 16,
+    border: 'none',
+    background: 'linear-gradient(135deg, #D4A843, #C49A38)',
+    color: '#0A0A0B',
+    fontSize: 16,
+    fontWeight: 700,
+    cursor: 'pointer',
+    transition: 'all 0.3s ease',
+    boxShadow: '0 4px 24px rgba(212,168,67,0.25)',
+    fontFamily: 'inherit',
+  },
+  secondaryBtn: {
+    width: '100%',
+    padding: '16px 24px',
+    borderRadius: 16,
+    border: '1px solid rgba(255,255,255,0.12)',
+    background: 'transparent',
+    color: '#ccc',
+    fontSize: 15,
+    fontWeight: 600,
+    cursor: 'pointer',
+    transition: 'all 0.2s ease',
+    fontFamily: 'inherit',
+  },
 }
