@@ -314,51 +314,57 @@ export default function LiveMonitor() {
               <p className="text-sm">No hay solicitudes pendientes</p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-3">
               {active.map((req) => {
                 const typeInfo = REQUEST_TYPES[req.type]
                 const statusInfo = REQUEST_STATUS[req.status]
                 const mins = getTimeDiffMinutes(req.created_at)
                 const Icon = ICONS[typeInfo.icon as keyof typeof ICONS] || Bell
+                const borderColor = req.status === 'pending' ? 'border-l-yellow-500' : req.status === 'seen' ? 'border-l-blue-500' : 'border-l-indigo-500'
 
                 return (
-                  <div key={req.id} className={`stat-card border-l-4 ${req.status === 'pending' ? 'border-l-yellow-500' : req.status === 'seen' ? 'border-l-blue-500' : 'border-l-indigo-500'}`}>
-                    <div className="flex items-start justify-between mb-3">
-                      <div className="flex items-center gap-3">
-                        <Icon size={20} className={typeInfo.color} />
+                  <div key={req.id} className={`stat-card border-l-4 ${borderColor} w-full`}>
+                    <div className="flex items-center gap-5">
+                      {/* Left: Emoji + Mesa */}
+                      <div className="flex items-center gap-4 shrink-0">
+                        <span className="text-3xl">{TYPE_EMOJI[req.type] || '🔔'}</span>
                         <div>
-                          <p className="font-semibold">Mesa {req.table_number}</p>
-                          <p className="text-xs text-zinc-500">{typeInfo.label}</p>
+                          <p className="text-xl font-bold leading-tight">Mesa {req.table_number}</p>
+                          <p className="text-sm text-zinc-400">{typeInfo.label}</p>
                         </div>
                       </div>
-                      <div className="text-right">
-                        <span className={`badge ${statusInfo.color} text-white text-[10px]`}>{statusInfo.label}</span>
-                        <p className="text-xs text-zinc-500 mt-1">{mins} min</p>
+
+                      {/* Center: Note + Waiter */}
+                      <div className="flex-1 min-w-0">
+                        {req.customer_note && (
+                          <p className="text-sm text-zinc-400 italic truncate">💬 "{req.customer_note}"</p>
+                        )}
+                        <p className="text-xs text-zinc-500 mt-0.5">👤 {getWaiterName(req.waiter_id)}</p>
                       </div>
-                    </div>
 
-                    {req.customer_note && (
-                      <p className="text-sm text-zinc-400 bg-dark-900 rounded-lg p-2 mb-3 italic">"{req.customer_note}"</p>
-                    )}
-
-                    <div className="flex items-center justify-between">
-                      <p className="text-xs text-zinc-500">👤 {getWaiterName(req.waiter_id)}</p>
-                      <div className="flex gap-2">
-                        {req.status === 'pending' && (
-                          <button onClick={() => updateStatus(req, 'seen')} className="btn-outline text-xs py-1.5 px-3 flex items-center gap-1">
-                            <Eye size={12} /> Visto
-                          </button>
-                        )}
-                        {(req.status === 'pending' || req.status === 'seen') && (
-                          <button onClick={() => updateStatus(req, 'in_progress')} className="btn-outline text-xs py-1.5 px-3 flex items-center gap-1 border-blue-500/30 text-blue-400">
-                            <ArrowRight size={12} /> En Camino
-                          </button>
-                        )}
-                        {req.status !== 'completed' && (
-                          <button onClick={() => updateStatus(req, 'completed')} className="btn-gold text-xs py-1.5 px-3 flex items-center gap-1">
-                            <Check size={12} /> Atendido
-                          </button>
-                        )}
+                      {/* Right: Status + Time + Actions */}
+                      <div className="flex items-center gap-4 shrink-0">
+                        <div className="text-right mr-2">
+                          <span className={`badge ${statusInfo.color} text-white text-[10px]`}>{statusInfo.label}</span>
+                          <p className="text-xs text-zinc-500 mt-1">{mins} min</p>
+                        </div>
+                        <div className="flex gap-2">
+                          {req.status === 'pending' && (
+                            <button onClick={() => updateStatus(req, 'seen')} className="btn-outline text-xs py-2 px-4 flex items-center gap-1">
+                              <Eye size={14} /> Visto
+                            </button>
+                          )}
+                          {(req.status === 'pending' || req.status === 'seen') && (
+                            <button onClick={() => updateStatus(req, 'in_progress')} className="btn-outline text-xs py-2 px-4 flex items-center gap-1 border-blue-500/30 text-blue-400">
+                              <ArrowRight size={14} /> En Camino
+                            </button>
+                          )}
+                          {req.status !== 'completed' && (
+                            <button onClick={() => updateStatus(req, 'completed')} className="btn-gold text-xs py-2 px-4 flex items-center gap-1">
+                              <Check size={14} /> Atendido
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </div>
                   </div>
