@@ -4,8 +4,8 @@ import { db } from '@/lib/firebase'
 import { useAuth } from '@/hooks/useAuth'
 import { useCollection } from '@/hooks/useCollection'
 import { generateQRToken, TABLE_STATUS } from '@/lib/utils'
-import type { Table } from '@/lib/types'
-import { Plus, Trash2, Printer } from 'lucide-react'
+import type { Table, Waiter } from '@/lib/types'
+import { Plus, Trash2, Printer, User, X, UserCheck } from 'lucide-react'
 import { toast } from 'sonner'
 import { useNavigate } from 'react-router-dom'
 
@@ -14,9 +14,15 @@ export default function TableManagement() {
   const navigate = useNavigate()
   const rid = session?.restaurantId || ''
   const { data: tables, loading } = useCollection<Table>(`restaurants/${rid}/tables`, [], !!rid)
+  const { data: waiters } = useCollection<Waiter>(`restaurants/${rid}/waiters`, [], !!rid)
   const [creating, setCreating] = useState(false)
+  const [selectedTable, setSelectedTable] = useState<Table | null>(null)
 
   const sortedTables = [...tables].sort((a, b) => a.number - b.number)
+  const activeWaiters = waiters.filter(w => w.is_active)
+
+  // Map waiter IDs to names for quick lookup
+  const waiterMap = new Map(waiters.map(w => [w.id, w]))
 
   const handleAddTable = async () => {
     if (creating) return
@@ -40,7 +46,8 @@ export default function TableManagement() {
     setCreating(false)
   }
 
-  const handleDelete = async (table: Table) => {
+  const handleDelete = async (e: React.MouseEvent, table: Table) => {
+    e.stopPropagation()
     if (!confirm(`¿Eliminar Mesa ${table.number}?`)) return
     try {
       await deleteDoc(doc(db, `restaurants/${rid}/tables`, table.id))
@@ -51,7 +58,8 @@ export default function TableManagement() {
     }
   }
 
-  const toggleStatus = async (table: Table) => {
+  const toggleStatus = async (e: React.MouseEvent, table: Table) => {
+    e.stopPropagation()
     const next = table.status === 'available' ? 'occupied'
       : table.status === 'occupied' ? 'needs_attention'
       : 'available'
@@ -59,6 +67,24 @@ export default function TableManagement() {
       await updateDoc(doc(db, `restaurants/${rid}/tables`, table.id), { status: next })
     } catch (err) {
       console.error(err)
+    }
+  }
+
+  const assignWaiter = async (waiterId: string | null) => {
+    if (!selectedTable) return
+    try {
+      await updateDoc(doc(db, `restaurants/${rid}/tables`, selectedTable.id), {
+        assigned_waiter_id: waiterId,
+      })
+      const waiterName = waiterId ? waiterMap.get(waiterId)?.name : null
+      toast.success(waiterId
+        ? `${waiterName} asignado a Mesa ${selectedTable.number}`
+        : `Mesa ${selectedTable.number} sin mesero asignado`
+      )
+      setSelectedTable(null)
+    } catch (err) {
+      console.error(err)
+      toast.error('Error al asignar mesero')
     }
   }
 
@@ -94,23 +120,44 @@ export default function TableManagement() {
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
           {sortedTables.map((table) => {
             const statusInfo = TABLE_STATUS[table.status]
+            const assignedWaiter = table.assigned_waiter_id
+              ? waiterMap.get(table.assigned_waiter_id)
+              : null
             return (
-              <div key={table.id} className="stat-card text-center relative group">
+              <div
+                key={table.id}
+                className="stat-card text-center relative group cursor-pointer hover:border-gold-500/40 transition-all"
+                onClick={() => setSelectedTable(table)}
+              >
                 {/* Delete */}
                 <button
-                  onClick={() => handleDelete(table)}
+                  onClick={(e) => handleDelete(e, table)}
                   className="absolute top-2 right-2 p-1 rounded text-zinc-700 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
                 >
                   <Trash2 size={14} />
                 </button>
 
                 {/* Number */}
-                <p className="text-3xl font-bold mb-2">{table.number}</p>
-                <p className="text-xs text-zinc-500 mb-3">{table.label || `Mesa ${table.number}`}</p>
+                <p className="text-3xl font-bold mb-1">{table.number}</p>
+                <p className="text-xs text-zinc-500 mb-2">{table.label || `Mesa ${table.number}`}</p>
+
+                {/* Assigned waiter */}
+                <div className="flex items-center justify-center gap-1.5 mb-3 min-h-[20px]">
+                  {assignedWaiter ? (
+                    <>
+                      <User size={12} className="text-gold-400" />
+                      <span className="text-[11px] text-gold-400 font-medium truncate max-w-[90px]">
+                        {assignedWaiter.name}
+                      </span>
+                    </>
+                  ) : (
+                    <span className="text-[11px] text-zinc-600 italic">Sin mesero</span>
+                  )}
+                </div>
 
                 {/* Status badge */}
                 <button
-                  onClick={() => toggleStatus(table)}
+                  onClick={(e) => toggleStatus(e, table)}
                   className={`badge ${statusInfo.color} text-white text-[10px] cursor-pointer hover:scale-105 transition-transform`}
                 >
                   {statusInfo.label}
@@ -118,6 +165,75 @@ export default function TableManagement() {
               </div>
             )
           })}
+        </div>
+      )}
+
+      {/* Assign Waiter Modal */}
+      {selectedTable && (
+        <div className="modal-overlay" onClick={() => setSelectedTable(null)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-5">
+              <div>
+                <h2 className="text-lg font-bold">Mesa {selectedTable.number}</h2>
+                <p className="text-xs text-zinc-500 mt-0.5">Asignar mesero responsable</p>
+              </div>
+              <button onClick={() => setSelectedTable(null)} className="p-2 rounded-lg text-zinc-500 hover:text-white hover:bg-zinc-800 transition-colors">
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="space-y-2 max-h-[320px] overflow-y-auto">
+              {/* Option: No waiter */}
+              <button
+                onClick={() => assignWaiter(null)}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all text-left
+                  ${!selectedTable.assigned_waiter_id
+                    ? 'bg-zinc-800 border border-zinc-700'
+                    : 'hover:bg-zinc-800/50 border border-transparent'
+                  }`}
+              >
+                <div className="w-9 h-9 rounded-full bg-zinc-800 flex items-center justify-center">
+                  <X size={14} className="text-zinc-500" />
+                </div>
+                <span className="text-sm text-zinc-400">Sin mesero asignado</span>
+                {!selectedTable.assigned_waiter_id && (
+                  <UserCheck size={16} className="ml-auto text-gold-400" />
+                )}
+              </button>
+
+              {activeWaiters.length === 0 ? (
+                <p className="text-sm text-zinc-500 text-center py-4">No hay meseros activos</p>
+              ) : (
+                activeWaiters.map((w) => {
+                  const isAssigned = selectedTable.assigned_waiter_id === w.id
+                  return (
+                    <button
+                      key={w.id}
+                      onClick={() => assignWaiter(w.id)}
+                      className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all text-left
+                        ${isAssigned
+                          ? 'bg-gold-500/10 border border-gold-500/30'
+                          : 'hover:bg-zinc-800/50 border border-transparent'
+                        }`}
+                    >
+                      <div className={`w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold shrink-0 ${
+                        isAssigned ? 'bg-gold-500/20 text-gold-400' : 'bg-emerald-500/20 text-emerald-400'
+                      }`}>
+                        {w.name.charAt(0).toUpperCase()}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className={`text-sm font-medium ${isAssigned ? 'text-gold-400' : ''}`}>{w.name}</p>
+                        <p className="text-[11px] text-zinc-500">Código: {w.access_code}</p>
+                      </div>
+                      {isAssigned && (
+                        <UserCheck size={16} className="text-gold-400 shrink-0" />
+                      )}
+                    </button>
+                  )
+                })
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>

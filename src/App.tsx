@@ -70,7 +70,7 @@ export default function App() {
         </Routes>
 
         <Toaster
-          position="top-right"
+          position="bottom-right"
           theme="dark"
           toastOptions={{
             style: {
